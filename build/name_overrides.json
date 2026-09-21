@@ -1,0 +1,32 @@
+{
+  "main": {
+    "452100": "Ganges–Brahmaputra",
+    "568101": "Lake Eyre basin",
+    "564101": "Murray–Darling",
+    "725100": "St Lawrence",
+    "482101": "Tarim",
+    "294100": "Tigris–Euphrates",
+    "752110": "Rio Grande",
+    "114100": "Jubba–Shebelle",
+    "227101": "Danube",
+    "462110": "Syr Darya",
+    "436610": "Pearl (Xi)",
+    "243210": "Neva",
+    "642110": "Paraná",
+    "432101": "Yellow River",
+    "436810": "Red River",
+    "713810": "Moose"
+  },
+  "sea": {
+    "564101": "Encounter Bay, Southern Ocean",
+    "725100": "Gulf of St Lawrence",
+    "482101": "Lop Nur",
+    "129101": "Okavango Delta",
+    "461101": "Aral Sea",
+    "462110": "Aral Sea",
+    "291410": "Hamun lakes",
+    "232810": "North Sea",
+    "622100": "North Atlantic Ocean",
+    "434100": "East China Sea"
+  }
+}

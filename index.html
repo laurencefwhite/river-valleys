@@ -1,0 +1,1760 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>River Valleys</title>
+<meta name="description" content="An interactive globe of the world's river valleys: every outflow to the sea in its own hue, and every tributary and sub-valley a shade of it.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Spectral:ital,wght@0,300;0,400;1,300;1,400;1,500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#04060c;
+  --panel:rgba(13,18,29,.84);
+  --panel-brd:rgba(255,255,255,.10);
+  --ink:#e9eef7;
+  --ink-dim:#9aa8c0;
+  --ink-faint:#6c7a93;
+  --accent:#8ed0ff;
+  --shadow:0 18px 50px -12px rgba(0,0,0,.75);
+  --serif:'Spectral',Georgia,'Times New Roman',serif;
+  --sans:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{
+  background:var(--bg);
+  color:var(--ink);
+  font-family:var(--sans);
+  font-size:13px;
+  -webkit-font-smoothing:antialiased;
+  overflow:hidden;
+  overscroll-behavior:none;
+}
+#stage{position:fixed;inset:0}
+canvas{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none}
+#globe{cursor:grab}
+#globe.dragging{cursor:grabbing}
+
+.pmin{
+  position:absolute;top:7px;right:8px;z-index:3;
+  width:19px;height:19px;padding:0;border-radius:6px;
+  background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.10);
+  color:var(--ink-faint);font:inherit;font-size:12px;line-height:1;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  transition:background .15s,color .15s;
+}
+.pmin::before{content:'\2013'}
+.pmin:hover{background:rgba(255,255,255,.13);color:var(--ink)}
+.panel.min{padding:0 !important;width:auto !important;min-width:0 !important}
+.panel.min > *:not(.pmin){display:none !important}
+.panel.min .pmin{
+  position:static;width:auto;height:28px;padding:0 12px;border:0;border-radius:14px;
+  background:transparent;font-size:10px;letter-spacing:.12em;text-transform:uppercase;
+}
+.panel.min .pmin::before{content:attr(data-name)}
+.panel.min:hover .pmin{background:rgba(255,255,255,.07);color:var(--ink)}
+
+.panel{
+  position:absolute;
+  background:var(--panel);
+  border:1px solid var(--panel-brd);
+  border-radius:14px;
+  box-shadow:var(--shadow);
+  backdrop-filter:blur(18px) saturate(140%);
+  -webkit-backdrop-filter:blur(18px) saturate(140%);
+}
+
+/* ---------- masthead ---------- */
+#masthead{top:18px;left:18px;padding:15px 18px 14px;width:268px}
+#masthead h1{
+  margin:0;
+  font-family:var(--serif);
+  font-weight:400;
+  font-size:21px;
+  letter-spacing:.005em;
+  line-height:1.15;
+}
+#masthead .sub{
+  margin-top:3px;color:var(--ink-faint);font-size:10.5px;
+  letter-spacing:.14em;text-transform:uppercase;
+}
+.clocks{display:flex;gap:16px;margin-top:12px;padding-top:11px;border-top:1px solid rgba(255,255,255,.08)}
+.clock{flex:1;min-width:0}
+.clock .lab{font-size:9.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--ink-faint)}
+.clock .val{font-size:17px;font-variant-numeric:tabular-nums;letter-spacing:.01em;margin-top:1px}
+.clock .zone{font-size:9.5px;color:var(--ink-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* ---------- controls ---------- */
+#controls{top:18px;right:18px;width:246px;padding:14px 16px 15px}
+.grp+.grp{margin-top:14px;padding-top:13px;border-top:1px solid rgba(255,255,255,.08)}
+.grp-t{font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint);margin-bottom:9px}
+.tog{display:flex;align-items:center;gap:9px;padding:4px 0;cursor:pointer;user-select:none}
+.tog input{position:absolute;opacity:0;pointer-events:none}
+.sw{
+  width:30px;height:17px;border-radius:9px;flex:none;position:relative;
+  background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.13);
+  transition:background .18s,border-color .18s;
+}
+.sw::after{
+  content:'';position:absolute;top:2px;left:2px;width:11px;height:11px;border-radius:50%;
+  background:#b8c4d8;transition:transform .18s,background .18s;
+}
+.tog input:checked+.sw{background:rgba(142,208,255,.30);border-color:rgba(142,208,255,.55)}
+.tog input:checked+.sw::after{transform:translateX(13px);background:var(--accent)}
+.tog span.tl{font-size:12px;color:var(--ink)}
+.tog input:not(:checked)~span.tl{color:var(--ink-dim)}
+
+#search{position:relative}
+#search input{
+  width:100%;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);
+  border-radius:9px;padding:8px 10px 8px 30px;color:var(--ink);font:inherit;font-size:12px;outline:none;
+}
+#search input::placeholder{color:var(--ink-faint)}
+#search input:focus{border-color:rgba(142,208,255,.5);background:rgba(255,255,255,.09)}
+#search .ico{position:absolute;left:9px;top:50%;transform:translateY(-50%);opacity:.5;pointer-events:none;font-size:12px}
+#results{
+  position:absolute;left:0;right:0;top:calc(100% + 6px);max-height:236px;overflow-y:auto;z-index:5;
+  background:rgba(12,17,28,.96);border:1px solid var(--panel-brd);border-radius:10px;
+  box-shadow:var(--shadow);padding:4px;display:none;
+}
+#results.on{display:block}
+#results .r{padding:6px 9px;border-radius:7px;cursor:pointer;display:flex;justify-content:space-between;gap:8px;align-items:baseline}
+#results .r:hover,#results .r.sel{background:rgba(142,208,255,.14)}
+#results .r .nm{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#results .r .ct{font-size:10px;color:var(--ink-faint);white-space:nowrap}
+
+.btn{
+  background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.13);color:var(--ink);
+  border-radius:8px;padding:5px 10px;font:inherit;font-size:11.5px;cursor:pointer;white-space:nowrap;
+  transition:background .15s,border-color .15s;
+}
+.btn:hover{background:rgba(255,255,255,.13)}
+.btn.on{background:rgba(142,208,255,.20);border-color:rgba(142,208,255,.45);color:var(--accent)}
+
+/* ---------- legend ---------- */
+#legend{left:18px;bottom:56px;padding:11px 14px 12px;width:268px}
+#legend .lt{font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint);margin-bottom:8px;display:flex;justify-content:space-between}
+.ramp{display:flex;height:15px;border-radius:4px;overflow:hidden}
+.ramp div{flex:1}
+.ramp.hues{cursor:crosshair}
+.ramp.hues div{transition:transform .12s}
+.ramp.hues div:hover{transform:scaleY(1.45)}
+.rticks{display:flex;justify-content:space-between;margin-top:5px;font-size:9.5px;color:var(--ink-faint)}
+.rrow{display:flex;align-items:center;gap:8px;margin-top:6px}
+.rrow .ramp{flex:1;height:13px}
+.rrow .rl{width:64px;font-size:9.5px;color:var(--ink-dim);flex:none}
+#legend .note{margin-top:9px;font-size:10px;line-height:1.45;color:var(--ink-faint)}
+#legend .lsec{margin-top:12px;padding-top:11px;border-top:1px solid rgba(255,255,255,.08)}
+#biglist{margin-top:2px;max-height:132px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.15) transparent}
+#biglist .b{display:flex;align-items:center;gap:8px;padding:3px 4px;border-radius:6px;cursor:pointer;font-size:11px;color:var(--ink-dim)}
+#biglist .b:hover{background:rgba(142,208,255,.12);color:var(--ink)}
+#biglist .b i{width:9px;height:9px;border-radius:2px;flex:none}
+#biglist .b .ar{margin-left:auto;font-size:9.5px;color:var(--ink-faint);font-variant-numeric:tabular-nums}
+
+/* ---------- tooltip ---------- */
+#tip{
+  position:absolute;pointer-events:none;z-index:20;opacity:0;transition:opacity .12s;
+  background:rgba(10,15,25,.90);border:1px solid rgba(255,255,255,.13);border-radius:12px;
+  padding:11px 13px;min-width:190px;max-width:290px;box-shadow:var(--shadow);
+  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+}
+#tip.on{opacity:1}
+#tip.touch.on{pointer-events:none}
+#tip .tgo{margin-top:9px;display:flex;align-items:center;gap:8px;font-size:10px;color:var(--ink-faint)}
+#tip .tgo .btn{padding:4px 9px;font-size:11px;pointer-events:auto}
+#tip .tn{font-family:var(--serif);font-size:16px;line-height:1.2;display:flex;align-items:center;gap:8px}
+#tip .tn i{width:10px;height:10px;border-radius:3px;flex:none}
+#tip .tc{font-size:10.5px;color:var(--ink-faint);letter-spacing:.05em;margin-top:2px}
+#tip .path{font-size:11.5px;letter-spacing:0;color:var(--ink-dim);line-height:1.45;margin-top:3px}
+#tip .path b{font-weight:500;color:var(--ink)}
+#tip .sep{color:var(--accent);opacity:.75;margin:0 .32em}
+#tip .tt .path{font-size:13px}
+#tip .tt{font-size:15px;margin-top:9px;line-height:1.25}
+#tip .tt small{display:block;font-size:9.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--ink-faint);margin-bottom:2px}
+#tip .td{font-size:11px;color:var(--ink-dim);margin-top:7px;padding-top:7px;border-top:1px solid rgba(255,255,255,.10);line-height:1.5}
+#tip .td b{font-weight:500;color:var(--ink);font-variant-numeric:tabular-nums}
+#tip .tzline{margin-top:7px;font-size:10.5px;color:var(--ink-faint)}
+
+/* the pills that come out when the sidebar is folded away */
+.floatbtn{
+  position:absolute;display:none;z-index:4;height:30px;padding:0 13px;border-radius:14px;
+  background:var(--panel);border:1px solid var(--panel-brd);box-shadow:var(--shadow);
+  backdrop-filter:blur(18px) saturate(140%);-webkit-backdrop-filter:blur(18px) saturate(140%);
+  font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint);
+}
+.floatbtn:hover{background:rgba(255,255,255,.07);color:var(--ink)}
+
+#hint{
+  position:absolute;left:50%;transform:translateX(-50%);bottom:52px;font-size:11px;color:var(--ink-faint);
+  letter-spacing:.05em;pointer-events:none;transition:opacity .8s;text-align:center;
+}
+#credit{
+  margin-top:11px;padding-top:10px;border-top:1px solid rgba(255,255,255,.08);
+  font-size:9px;letter-spacing:.03em;line-height:1.6;color:#63708a;
+}
+#credit a{color:#7f8da5;text-decoration:none}
+#credit a:hover{color:var(--accent)}
+
+@media (max-height:880px){
+  #legend{bottom:34px}
+}
+@media (max-height:800px){
+  #biglist{max-height:88px}
+}
+@media (max-height:700px){
+  #legend .lsec{display:none}
+}
+@media (max-width:860px){
+  #masthead.min, #controls.min{right:auto}
+  #masthead{top:10px;left:10px;right:10px;width:auto;padding:11px 14px 12px}
+  #masthead h1{font-size:18px}
+  #masthead .sub{display:none}
+  #masthead .clocks{margin-top:9px;padding-top:9px}
+  #masthead .clock .val{font-size:15px}
+
+  #controls{top:auto;bottom:10px;right:10px;left:10px;width:auto;padding:26px 12px 10px}
+  #controls.min{padding:0 !important}
+  .grp+.grp{border-top:0;padding-top:9px;margin-top:0}
+  #controls .grp-t{display:none}
+  #controls .grp.togs{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none}
+  #controls .grp.togs::-webkit-scrollbar{display:none}
+  .tog{flex:none;padding:5px 11px;border-radius:999px;border:1px solid rgba(255,255,255,.13);background:rgba(255,255,255,.05)}
+  .tog .sw{display:none}
+  .tog span.tl{font-size:11.5px;white-space:nowrap;color:var(--ink-faint)}
+  .tog input:checked~span.tl{color:var(--accent)}
+  #results{max-height:180px;top:auto;bottom:calc(100% + 6px)}
+
+  #legend{display:none}
+  #hint{display:none}
+  #credit{display:none}
+}
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="sky"></canvas>
+  <canvas id="globe"></canvas>
+
+  <div id="tip"></div>
+
+  <div class="panel" id="masthead">
+    <button class="pmin" data-name="Title" title="Minimise"></button>
+    <h1>River Valleys</h1>
+    <div class="sub">Every river to its sea</div>
+    <div class="clocks">
+      <div class="clock">
+        <div class="lab">Sea outflows</div>
+        <div class="val" id="st-mains">&ndash;</div>
+        <div class="zone" id="st-mains2">&nbsp;</div>
+      </div>
+      <div class="clock">
+        <div class="lab">Valleys drawn</div>
+        <div class="val" id="st-units">&ndash;</div>
+        <div class="zone" id="st-units2">&nbsp;</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel" id="controls">
+    <button class="pmin" data-name="Layers" title="Minimise"></button>
+    <div class="grp">
+      <div class="grp-t">Find a river or a city</div>
+      <div id="search">
+        <span class="ico">&#9906;</span>
+        <input id="q" type="text" placeholder="Murray, Danube, Manaus&hellip;" autocomplete="off" spellcheck="false">
+        <div id="results"></div>
+      </div>
+    </div>
+    <div class="grp togs">
+      <div class="grp-t">Layers</div>
+      <label class="tog"><input type="checkbox" id="L-basins" checked><span class="sw"></span><span class="tl">River valleys</span></label>
+      <label class="tog"><input type="checkbox" id="L-shade" checked><span class="sw"></span><span class="tl">Tributary shading</span></label>
+      <label class="tog"><input type="checkbox" id="L-edges" checked><span class="sw"></span><span class="tl">Valley divides</span></label>
+      <label class="tog"><input type="checkbox" id="L-rivers" checked><span class="sw"></span><span class="tl">Rivers</span></label>
+      <label class="tog"><input type="checkbox" id="L-lakes" checked><span class="sw"></span><span class="tl">Lakes</span></label>
+      <label class="tog"><input type="checkbox" id="L-bnames" checked><span class="sw"></span><span class="tl">Basin names</span></label>
+      <label class="tog"><input type="checkbox" id="L-tnames" checked><span class="sw"></span><span class="tl">Tributary names</span></label>
+      <label class="tog"><input type="checkbox" id="L-inland" checked><span class="sw"></span><span class="tl">Mute inland basins</span></label>
+      <label class="tog"><input type="checkbox" id="L-co"><span class="sw"></span><span class="tl">Country borders</span></label>
+      <label class="tog"><input type="checkbox" id="L-cities" checked><span class="sw"></span><span class="tl">Cities</span></label>
+      <label class="tog"><input type="checkbox" id="L-names"><span class="sw"></span><span class="tl">City names</span></label>
+      <label class="tog"><input type="checkbox" id="L-grat" checked><span class="sw"></span><span class="tl">Graticule</span></label>
+      <label class="tog"><input type="checkbox" id="L-spin" checked><span class="sw"></span><span class="tl">Slow spin</span></label>
+    </div>
+    <div class="grp">
+      <button class="btn" id="resetview" title="Recentre and fit the globe">Reset View</button>
+    </div>
+  </div>
+
+  <button class="btn floatbtn" id="resetfloat" title="Recentre and fit the globe">Reset view</button>
+
+  <div class="panel" id="legend">
+    <button class="pmin" data-name="Key" title="Minimise"></button>
+    <div class="lt"><span>One hue, one way to the sea</span></div>
+    <div class="ramp hues" id="hueramp"></div>
+    <div class="note">Everything that reaches the sea by the same mouth shares a hue. Neighbouring basins are given hues well apart; the hue itself carries no other meaning, except that blue is kept for water.</div>
+
+    <div class="lsec">
+      <div class="lt"><span>Shades within a basin</span><span id="legend-level"></span></div>
+      <div class="rrow"><span class="rl">Main stem</span><div class="ramp" id="stemramp"></div></div>
+      <div class="rrow"><span class="rl">Tributaries</span><div class="ramp" id="tribramp"></div></div>
+      <div class="rticks"><span style="margin-left:72px">mouth</span><span>source</span></div>
+      <div class="note">On a card, <b style="color:var(--accent);font-weight:500">/</b> is a confluence and <b style="color:var(--accent);font-weight:500">&gt;</b> the same river under a new name, read from the mouth up: Thames&thinsp;/&thinsp;Cherwell&thinsp;/&thinsp;Ray.</div>
+      <div class="note">The main stem runs dark, its tributaries light, and each tributary valley is split the same way again. Zoom in and the valleys divide further, five times over. Basins with no way to the sea are drawn muted.</div>
+    </div>
+
+    <div class="lsec">
+      <div class="lt"><span>Largest basins</span></div>
+      <div id="biglist"></div>
+    </div>
+
+    <div id="credit">
+      Valleys: <a href="https://www.hydrosheds.org/products/hydrobasins" target="_blank" rel="noopener">HydroBASINS</a> v1c (Lehner &amp; Grill 2013), levels 4&ndash;8<br>
+      Rivers, lakes, seas, countries: <a href="https://www.naturalearthdata.com" target="_blank" rel="noopener">Natural Earth</a><br>
+      River and creek names: &copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors, via <a href="https://overturemaps.org" target="_blank" rel="noopener">Overture Maps</a>
+    </div>
+  </div>
+
+  <div id="hint">Drag to spin &middot; scroll to zoom &middot; hover a valley to see where its water goes</div>
+</div>
+
+<script src="lib/globe-libs.js"></script>
+<script src="data/base.js"></script>
+<script src="data/l4.js"></script>
+<script>
+(function () {
+'use strict';
+
+var D = window.RV_DATA;
+var DEG = Math.PI / 180;
+
+/* ------------------------------------------------------------------ data */
+/* one entry per mouth (or inland sink), keyed by the Pfafstetter code of the valley at the mouth */
+var MAINS = {}, MAIN_LIST = [];
+function addMains(tab) {
+  Object.keys(tab || {}).forEach(function (id) {
+    if (MAINS[id]) return;
+    var m = tab[id];
+    MAINS[id] = { id: +id, name: m[0], sink: m[1], area: m[2], hue: m[3], endo: !!m[4], lump: !!m[5],
+                  k: m[6], anchor: m[7], n: m[8], rivers: m[9] || [] };
+  });
+}
+addMains(D.mains);
+MAIN_LIST = Object.keys(MAINS).map(function (id) { return MAINS[id]; }).sort(function (a, b) { return b.area - a.area; });
+var NOMAIN = { id: 0, name: '', sink: '', area: 0, hue: 210, endo: false, lump: false, k: 8, anchor: null, n: 1, rivers: [] };
+
+var world     = topojson.feature(D.countries, D.countries.objects.countries);
+var coastNE   = topojson.mesh(D.countries, D.countries.objects.countries, function (a, b) { return a === b; });
+var borders   = topojson.mesh(D.countries, D.countries.objects.countries, function (a, b) { return a !== b; });
+var graticule = d3.geoGraticule().step([15, 15])();
+function parallel(lat) { return d3.geoCircle().center([0, 90]).radius(90 - lat).precision(2)(); }
+var EQUATOR = parallel(0);
+var TROPIC_N = parallel(23.4368), TROPIC_S = parallel(-23.4368);
+var POLAR_N = parallel(66.5632), POLAR_S = parallel(-66.5632);
+
+var cities = D.cities.map(function (c) {
+  return { name: c[0], country: c[1], lat: c[2], lon: c[3], pop: c[4], rank: c[5] || 0, state: c[6] || null };
+});
+
+/* --------------------------------- spherical caps, to cull what is out of view */
+function unitv(ll) {
+  var l = ll[0] * DEG, p = ll[1] * DEG, cp = Math.cos(p);
+  return [cp * Math.cos(l), cp * Math.sin(l), Math.sin(p)];
+}
+function eachCoord(g, step, fn) {
+  var i, j, k, c = g.coordinates;
+  if (g.type === 'Polygon') { for (i = 0; i < c.length; i++) for (j = 0; j < c[i].length; j += step) fn(c[i][j]); }
+  else if (g.type === 'MultiPolygon') { for (i = 0; i < c.length; i++) for (j = 0; j < c[i].length; j++) for (k = 0; k < c[i][j].length; k += step) fn(c[i][j][k]); }
+  else if (g.type === 'LineString') { for (i = 0; i < c.length; i += step) fn(c[i]); }
+  else if (g.type === 'MultiLineString') { for (i = 0; i < c.length; i++) for (j = 0; j < c[i].length; j += step) fn(c[i][j]); }
+}
+function capOf(g) {
+  var sx = 0, sy = 0, sz = 0, n = 0, us = [];
+  eachCoord(g, 2, function (p) { var u = unitv(p); us.push(u); sx += u[0]; sy += u[1]; sz += u[2]; n++; });
+  if (!n) return { c: [1, 0, 0], r: Math.PI };
+  var m = Math.sqrt(sx * sx + sy * sy + sz * sz) || 1;
+  var c = [sx / m, sy / m, sz / m], minDot = 1;
+  for (var i = 0; i < us.length; i++) {
+    var d = c[0] * us[i][0] + c[1] * us[i][1] + c[2] * us[i][2];
+    if (d < minDot) minDot = d;
+  }
+  return { c: c, r: Math.acos(Math.max(-1, Math.min(1, minDot))) + 0.03 };
+}
+/* The clock only had to drop the far side. Zoomed in on sixteen thousand valleys, most of the near
+   side is off the screen as well, so the test is against the cone the window actually shows. */
+var viewV = [1, 0, 0], viewAng = Math.PI / 2;
+function capVisible(cap) {
+  var lim = viewAng + cap.r;
+  if (lim >= Math.PI) return true;
+  return cap.c[0] * viewV[0] + cap.c[1] * viewV[1] + cap.c[2] * viewV[2] > Math.cos(lim);
+}
+/* d3's path does the clipping and the resampling that the limb of the globe needs, and costs
+   accordingly. Anything wholly on the near side needs neither: its corners are kept as unit vectors
+   and go straight through the rotation to the canvas, which is several times quicker. */
+function toXYZ(g) {
+  var rings = [], c = g.coordinates, i, j;
+  function add(r) {
+    var a = new Float32Array(r.length * 3);
+    for (var n = 0; n < r.length; n++) { var u = unitv(r[n]); a[n * 3] = u[0]; a[n * 3 + 1] = u[1]; a[n * 3 + 2] = u[2]; }
+    rings.push(a);
+  }
+  if (g.type === 'Polygon') for (i = 0; i < c.length; i++) add(c[i]);
+  else if (g.type === 'MultiPolygon') for (i = 0; i < c.length; i++) for (j = 0; j < c[i].length; j++) add(c[i][j]);
+  else if (g.type === 'LineString') add(c);
+  else if (g.type === 'MultiLineString') for (i = 0; i < c.length; i++) add(c[i]);
+  return rings;
+}
+var FX = [0, 0, 0], FY = [0, 0, 0];
+function setFastProjection(r) {
+  var dl = rotation[0] * DEG, dp = rotation[1] * DEG;
+  FX = [r * Math.sin(dl), r * Math.cos(dl), 0];
+  FY = [-r * Math.sin(dp) * Math.cos(dl), r * Math.sin(dp) * Math.sin(dl), -r * Math.cos(dp)];
+}
+/* adds an entry's outline to the path in hand; e.g is a feature or a bare geometry */
+function trace(e, closed) {
+  var cap = e.cap;
+  if (cap.r < 1.5 && cap.c[0] * viewV[0] + cap.c[1] * viewV[1] + cap.c[2] * viewV[2] > Math.sin(cap.r + 0.03)) {
+    var rings = e.xyz || (e.xyz = toXYZ(e.g.geometry || e.g));
+    for (var i = 0; i < rings.length; i++) {
+      var a = rings[i], n = a.length;
+      ctx.moveTo(CX + FX[0] * a[0] + FX[1] * a[1], CY + FY[0] * a[0] + FY[1] * a[1] + FY[2] * a[2]);
+      for (var k = 3; k < n; k += 3) ctx.lineTo(CX + FX[0] * a[k] + FX[1] * a[k + 1], CY + FY[0] * a[k] + FY[1] * a[k + 1] + FY[2] * a[k + 2]);
+      if (closed) ctx.closePath();
+    }
+  } else path(e.g);
+}
+function planarBox(g) {
+  var x0 = 999, y0 = 999, x1 = -999, y1 = -999;
+  eachCoord(g, 1, function (p) {
+    if (p[0] < x0) x0 = p[0]; if (p[0] > x1) x1 = p[0];
+    if (p[1] < y0) y0 = p[1]; if (p[1] > y1) y1 = p[1];
+  });
+  return [x0, y0, x1, y1];
+}
+/* a mesh comes back as one great MultiLineString; cut up, each line can be culled on its own */
+function chunkLines(mls, seam) {
+  var out = [];
+  (mls.coordinates || []).forEach(function (line) {
+    var parts = [line];
+    if (seam) {
+      /* the source polygons are cut along the antimeridian, which would otherwise be drawn as a coast */
+      parts = []; var cur = [];
+      for (var i = 0; i < line.length; i++) {
+        var onSeam = Math.abs(line[i][0]) > 179.99;
+        if (onSeam && i && Math.abs(line[i - 1][0]) > 179.99) { if (cur.length > 1) parts.push(cur); cur = []; }
+        cur.push(line[i]);
+      }
+      if (cur.length > 1) parts.push(cur);
+    }
+    parts.forEach(function (pl) {
+      for (var s = 0; s < pl.length - 1; s += 60) {            /* and long lines are cut shorter still */
+        var seg = pl.slice(s, s + 61);
+        if (seg.length < 2) continue;
+        var g = { type: 'LineString', coordinates: seg };
+        out.push({ g: g, cap: capOf(g) });
+      }
+    });
+  });
+  return out;
+}
+
+/* ---------------------------------------------------------------- colour */
+/* One hue per mouth; the digits of a valley's Pfafstetter code, past the ones the whole basin shares,
+   set the shade. Odd digits are reaches of the main stem, numbered from the mouth; even digits are
+   the tributaries that join between them. The next digit does the same within each of those. */
+var STEP = { 0: 0, 1: -13, 3: -10, 5: -7, 7: -4, 9: -1, 2: 6, 4: 10, 6: 14, 8: 18 };
+var TWIST = { 0: 0, 1: 0, 3: 0, 5: 0, 7: 0, 9: 0, 2: -9, 4: -3, 6: 3, 8: 9 };
+var DEPTH = [1, 0.5, 0.26, 0.15, 0.10, 0.07];
+function unitHcl(p, main, shaded, muted) {
+  var s = String(p), L = 63, H = main.hue, C = 50;
+  if (shaded) {
+    for (var i = main.k, d = 0; i < s.length && d < DEPTH.length; i++, d++) {
+      var dg = +s.charAt(i);
+      L += STEP[dg] * DEPTH[d];
+      H += TWIST[dg] * DEPTH[d];
+    }
+  }
+  if (muted && main.endo) { C = 15; L = L * 0.8 + 8; }
+  L = Math.max(40, Math.min(90, L));
+  return [H, C, L];
+}
+function css(hcl, a) {
+  var c = d3.hcl(hcl[0], hcl[1], hcl[2]).rgb();
+  var r = Math.round(Math.max(0, Math.min(255, c.r))), g = Math.round(Math.max(0, Math.min(255, c.g))), b = Math.round(Math.max(0, Math.min(255, c.b)));
+  return a === undefined ? 'rgb(' + r + ',' + g + ',' + b + ')' : 'rgba(' + r + ',' + g + ',' + b + ',' + a + ')';
+}
+
+var PALETTE = {
+  ocean0:   '#0d2036',
+  ocean1:   '#050d1a',
+  land:     '#45536f',
+  lake:     '#0f3157',
+  coast:    'rgba(226,238,255,.34)',
+  border:   'rgba(10,16,30,.55)',
+  grat:     'rgba(170,205,240,.10)',
+  divide:   'rgba(250,252,255,.62)',
+  sub:      'rgba(6,12,26,.30)',
+  river:    'rgba(70,214,255,',
+  bed:      'rgba(3,20,52,.55)',
+  rim:      'rgba(150,205,255,.42)'
+};
+
+/* ----------------------------------------------------- tiers of detail */
+/* Five cuts of the same hierarchy: HydroBASINS levels 4 to 8. Each level splits the one above by one
+   more Pfafstetter digit, so a valley's shade at one level is its parent's shade, nudged. Levels 4 to 6
+   come as one file each; 7 and 8 are too large for that and come as tiles, one per level 3 or level 4
+   region, fetched for whatever is on screen. */
+var TIERS = [
+  { key: 'l4', level: 4, minZoom: 0,   src: null },
+  { key: 'l5', level: 5, minZoom: 1.7, src: 'data/l5.js' },
+  { key: 'l6', level: 6, minZoom: 3.4, src: 'data/l6.js' }
+];
+var TILED = [
+  { level: 7, minZoom: 7.5, len: D.tiles['7'].len, codes: {}, built: {}, asked: {}, keep: 28 },
+  { level: 8, minZoom: 16,  len: D.tiles['8'].len, codes: {}, built: {}, asked: {}, keep: 56 }
+];
+TILED.forEach(function (tl) { D.tiles[String(tl.level)].codes.forEach(function (c) { tl.codes[c] = 1; }); });
+var tiers = {};
+var opt = { basins: true, shade: true, edges: true, rivers: true, lakes: true, bnames: true, tnames: true,
+            inland: true, co: false, cities: true, names: false, grat: true, spin: true };
+
+/* a valley's river path arrives as "Thames/Cherwell/Ray": '/' a confluence, '>' the same water renamed */
+function shortOf(path) {
+  var parts = path.split(/[\/>]/), n = parts[parts.length - 1];
+  return n === '?' ? '' : n;
+}
+function lineSet(topo, idx, seam) {
+  if (!idx || !idx.length) return [];
+  var g = topojson.feature(topo, { type: 'MultiLineString', arcs: idx.map(function (i) { return [i]; }) });
+  return chunkLines(g.geometry || g, seam);
+}
+function buildSet(topo, level) {
+  var obj = topo.objects.u;
+  var feats = topojson.feature(topo, obj).features;
+  var best = {};
+  var set = feats.map(function (f) {
+    var pr = f.properties, main = MAINS[pr.m] || NOMAIN, sp = String(pr.p);
+    var path = topo.paths[pr.h] || '';
+    var e = { g: f, p: pr.p, m: pr.m, main: main, area: pr.a, up: pr.u, path: path, name: shortOf(path), level: level,
+              c3: sp.slice(0, 3), c4: sp.slice(0, 4),
+              cap: capOf(f.geometry), box: planarBox(f.geometry), fill: '', cent: null, lab: false };
+    if (e.name && e.name !== main.name) {
+      var k = pr.m + '|' + e.name;
+      if (!best[k] || best[k].area < e.area) best[k] = e;
+    }
+    return e;
+  });
+  Object.keys(best).forEach(function (k) { best[k].lab = true; });   /* one label per tributary, on its largest piece */
+  set.sort(function (a, b) { return b.area - a.area; });
+  var water = [];
+  if (topo.water) {
+    var wq = topo.water.q;
+    topo.water.lines.forEach(function (w) {
+      var c = w[3], x = c[0], y = c[1], pts = [[x / wq, y / wq]];
+      for (var i = 2; i < c.length; i += 2) { x += c[i]; y += c[i + 1]; pts.push([x / wq, y / wq]); }
+      var g = { type: 'LineString', coordinates: pts };
+      water.push({ g: g, cap: capOf(g), river: w[1], c4: w[2], n: topo.water.names[w[0]] });
+    });
+  }
+  var S = {
+    level: level, topo: topo, obj: obj, set: set, water: water,
+    divide: lineSet(topo, topo.lines.d), sub: lineSet(topo, topo.lines.s), coast: lineSet(topo, topo.lines.c, true),
+    outline: {}
+  };
+  paintTier(S);
+  return S;
+}
+function buildTier(t) {
+  tiers[t.key] = buildSet(D[t.key], t.level);
+  tiers[t.key].t = t;
+}
+function paintTier(T) {
+  for (var i = 0; i < T.set.length; i++) {
+    var e = T.set[i];
+    e.hcl = unitHcl(e.p, e.main, opt.shade, opt.inland);
+    e.fill = css(e.hcl);
+  }
+}
+function repaint() {
+  Object.keys(tiers).forEach(function (k) { paintTier(tiers[k]); });
+  TILED.forEach(function (tl) { Object.keys(tl.built).forEach(function (c) { paintTier(tl.built[c]); }); });
+  buildLegend();
+}
+
+var loading = {};
+function loadTier(t) {
+  if (tiers[t.key] || loading[t.key] || !t.src) return;
+  loading[t.key] = true;
+  var s = document.createElement('script');
+  s.src = t.src;
+  s.onload = function () {
+    /* a breath before the heavy part, so the frame in hand gets out first */
+    setTimeout(function () { buildTier(t); loading[t.key] = false; updateStats(); draw(); }, 30);
+  };
+  s.onerror = function () { loading[t.key] = false; };
+  document.head.appendChild(s);
+}
+function wantTier() {
+  var w = TIERS[0];
+  for (var i = 0; i < TIERS.length; i++) if (zoom >= TIERS[i].minZoom) w = TIERS[i];
+  return w;
+}
+function currentTier() {
+  var w = wantTier(), idx = TIERS.indexOf(w);
+  /* ask a little early, so the finer cut is usually there by the time the zoom reaches it */
+  for (var i = 1; i < TIERS.length; i++) if (zoom >= TIERS[i].minZoom * 0.72) loadTier(TIERS[i]);
+  while (idx > 0 && !tiers[TIERS[idx].key]) idx--;
+  return tiers[TIERS[idx].key];
+}
+
+/* ---- tiles */
+var tileQueue = [], tileBusy = 0, tileClock = 0;
+window.RV_TILE = function (level, code, topo) {
+  var tl = TILED[level - 7];
+  addMains(topo.mains);
+  var S = buildSet(topo, level);
+  S.code = code; S.used = ++tileClock;
+  var x0 = 999, y0 = 999, x1 = -999, y1 = -999;
+  S.set.forEach(function (e) { x0 = Math.min(x0, e.box[0]); y0 = Math.min(y0, e.box[1]); x1 = Math.max(x1, e.box[2]); y1 = Math.max(y1, e.box[3]); });
+  S.box = [x0, y0, x1, y1];
+  tl.built[code] = S;
+  /* the least recently drawn go when there are too many, or a long wander would hold the whole world */
+  var codes = Object.keys(tl.built);
+  if (codes.length > tl.keep) {
+    codes.sort(function (a, b) { return tl.built[a].used - tl.built[b].used; });
+    for (var i = 0; i < codes.length - tl.keep; i++) { delete tl.built[codes[i]]; delete tl.asked[codes[i]]; }
+  }
+};
+function askTile(tl, code) {
+  if (tl.asked[code] || !tl.codes[code]) return;
+  tl.asked[code] = 1;
+  tileQueue.push([tl, code]);
+  pumpTiles();
+}
+function pumpTiles() {
+  while (tileBusy < 4 && tileQueue.length) {
+    var job = tileQueue.shift();
+    tileBusy++;
+    (function (tl, code) {
+      var s = document.createElement('script');
+      s.src = 'data/l' + tl.level + '/' + code + '.js';
+      s.onload = function () { tileBusy--; s.remove(); pumpTiles(); scheduleDraw(); };
+      s.onerror = function () { tileBusy--; delete tl.asked[code]; pumpTiles(); };
+      document.head.appendChild(s);
+    })(job[0], job[1]);
+  }
+}
+var drawTimer = null;
+function scheduleDraw() { if (!drawTimer) drawTimer = setTimeout(function () { drawTimer = null; draw(); }, 60); }
+
+/* What is on screen, finest last: the tile sets that are built and in view, and which regions they cover. */
+var scene = { sets: [], cov7: {}, cov8: {}, finest: 4 };
+function composeScene(T, settle) {
+  var sc = { sets: [], cov7: {}, cov8: {}, finest: T.level };
+  var want = 0;
+  for (var i = 0; i < TILED.length; i++) if (zoom >= TILED[i].minZoom) want = i + 1;
+  if (want) {
+    var seen3 = {}, seen4 = {};
+    for (var j = 0; j < T.set.length; j++) {
+      var e = T.set[j];
+      if (!capVisible(e.cap)) continue;
+      seen3[e.c3] = 1; seen4[e.c4] = 1;
+    }
+    var tl7 = TILED[0], tl8 = TILED[1], c;
+    if (want === 2) {
+      for (c in seen4) {
+        if (tl8.built[c]) { tl8.built[c].used = ++tileClock; sc.cov8[c] = 1; sc.sets.push(tl8.built[c]); sc.finest = 8; }
+        else if (settle) askTile(tl8, c);
+      }
+    }
+    for (c in seen3) {
+      if (tl7.built[c]) { tl7.built[c].used = ++tileClock; sc.cov7[c] = 1; sc.sets.push(tl7.built[c]); if (sc.finest < 7) sc.finest = 7; }
+      else if (settle && want === 1) askTile(tl7, c);
+    }
+    sc.sets.sort(function (a, b) { return a.level - b.level; });
+  }
+  return sc;
+}
+function covered(e, sc) {
+  if (e.level < 7) return sc.cov7[e.c3] || sc.cov8[e.c4];
+  if (e.level === 7) return sc.cov8[e.c4];
+  return false;
+}
+
+/* rivers and lakes */
+var riverSet = topojson.feature(D.rivers, D.rivers.objects[Object.keys(D.rivers.objects)[0]]).features
+  .filter(function (f) { return f.geometry; })
+  .map(function (f) { return { g: f, s: f.properties.s, n: f.properties.n || '', lake: f.properties.k, cap: capOf(f.geometry) }; });
+var lakeSet = topojson.feature(D.lakes, D.lakes.objects[Object.keys(D.lakes.objects)[0]]).features
+  .filter(function (f) { return f.geometry; })
+  .map(function (f) { return { g: f, n: f.properties.n || '', cap: capOf(f.geometry), area: d3.geoArea(f) }; });
+var landSet = world.features.map(function (f) { return { g: f, cap: capOf(f.geometry), box: planarBox(f.geometry) }; });
+
+/* ------------------------------------------------------------- projection */
+var skyCv  = document.getElementById('sky');
+var cv     = document.getElementById('globe');
+var ctx    = cv.getContext('2d');
+var skyCtx = skyCv.getContext('2d');
+
+var W = 0, H = 0, DPR = 1, R0 = 1, CX = 0, CY = 0;
+var rotation = [-12, -18, 0];
+var zoom = 1;
+var ZMAX = 512;
+var projection = d3.geoOrthographic().clipAngle(90).precision(0.35);
+var path = d3.geoPath(projection, ctx);
+var sphere = { type: 'Sphere' };
+
+function placePills() {
+  var panel = document.getElementById('controls');
+  var min = panel.classList.contains('min');
+  var list = pillList();
+  list.forEach(function (el) { el.style.display = min ? 'block' : 'none'; });
+  if (!min || !list.length) return;
+  var r = panel.getBoundingClientRect();
+  var leftwards = (r.left + r.width / 2) > window.innerWidth / 2;
+  var edge = leftwards ? r.left : r.right, gap = 8;
+  for (var i = 0; i < list.length; i++) {
+    var el = list[i], w = el.getBoundingClientRect().width;
+    var x = leftwards ? (edge - gap - w) : (edge + gap);
+    if (x < 6 || x + w > window.innerWidth - 6) { el.style.display = 'none'; continue; }
+    el.style.left = Math.round(x) + 'px';
+    el.style.right = 'auto';
+    el.style.top = Math.round(r.top) + 'px';
+    edge = leftwards ? x : x + w;
+  }
+}
+function pillList() { return [document.getElementById('resetfloat')].filter(Boolean); }
+
+function resize() {
+  placePills();
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth; H = window.innerHeight;
+  [cv, skyCv].forEach(function (c) {
+    c.width = Math.round(W * DPR); c.height = Math.round(H * DPR);
+    c.style.width = W + 'px'; c.style.height = H + 'px';
+  });
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  skyCtx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  var narrow = W < 700;
+  R0 = Math.min(W, H) * (narrow ? 0.47 : 0.475);
+  CX = W / 2;
+  CY = narrow ? H * 0.46 : H / 2;
+  drawSky();
+  draw();
+}
+
+function applyProjection() {
+  projection.rotate(rotation).scale(R0 * zoom).translate([CX, CY]);
+}
+
+/* ------------------------------------------------------------------- sky */
+var stars = null;
+function drawSky() {
+  var i, n = Math.round((W * H) / 5200);
+  if (!stars || stars.length !== n) {
+    stars = [];
+    for (i = 0; i < n; i++) {
+      stars.push([Math.random(), Math.random(), Math.pow(Math.random(), 2.6) * 1.35 + 0.18, 0.25 + Math.random() * 0.6]);
+    }
+  }
+  skyCtx.clearRect(0, 0, W, H);
+  var g = skyCtx.createRadialGradient(CX, CY, 0, CX, CY, Math.max(W, H) * 0.78);
+  g.addColorStop(0, '#0a1222');
+  g.addColorStop(0.45, '#070c17');
+  g.addColorStop(1, '#03050a');
+  skyCtx.fillStyle = g;
+  skyCtx.fillRect(0, 0, W, H);
+
+  var g2 = skyCtx.createRadialGradient(W * 0.16, H * 0.12, 0, W * 0.16, H * 0.12, Math.max(W, H) * 0.55);
+  g2.addColorStop(0, 'rgba(60,80,150,.16)');
+  g2.addColorStop(1, 'rgba(60,80,150,0)');
+  skyCtx.fillStyle = g2;
+  skyCtx.fillRect(0, 0, W, H);
+
+  for (i = 0; i < stars.length; i++) {
+    var s = stars[i];
+    skyCtx.globalAlpha = s[3];
+    skyCtx.fillStyle = i % 11 === 0 ? '#cfe0ff' : (i % 7 === 0 ? '#ffe8cf' : '#ffffff');
+    skyCtx.beginPath();
+    skyCtx.arc(s[0] * W, s[1] * H, s[2], 0, 2 * Math.PI);
+    skyCtx.fill();
+  }
+  skyCtx.globalAlpha = 1;
+}
+
+/* --------------------------------------------------------------- drawing */
+var FONT = "'Inter',-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
+var SERIF = "'Spectral',Georgia,'Times New Roman',serif";
+var hoverCity = null, hoverUnit = null, highlightMain = null;
+var interacting = false;
+var cityPts = [];
+var lastLevel = 0;
+
+function strokeLines(list, width, colour) {
+  ctx.beginPath();
+  for (var i = 0; i < list.length; i++) if (capVisible(list[i].cap)) trace(list[i], false);
+  ctx.lineWidth = width; ctx.strokeStyle = colour; ctx.stroke();
+}
+
+/* the outline of everything that shares a mouth, in whichever cut is on screen */
+function outlineOf(T, m) {
+  if (!T.outline[m]) {
+    T.outline[m] = topojson.mesh(T.topo, T.obj, function (a, b) {
+      var am = a.properties.m === m, bm = b.properties.m === m;
+      return a === b ? am : am !== bm;
+    });
+  }
+  return T.outline[m];
+}
+
+function draw() {
+  applyProjection();
+  var cx = CX, cy = CY, r = R0 * zoom;
+  var fast = interacting;
+  var T = currentTier();
+  viewV = unitv([-rotation[0], -rotation[1]]);
+  setFastProjection(r);
+  viewAng = Math.asin(Math.min(1, Math.hypot(Math.max(cx, W - cx), Math.max(cy, H - cy)) / r));
+  projection.precision(fast ? 1.4 : 0.35);
+
+
+  ctx.clearRect(0, 0, W, H);
+
+  /* outer atmosphere */
+  var ag = ctx.createRadialGradient(cx, cy, r * 0.985, cx, cy, r * 1.19);
+  ag.addColorStop(0, 'rgba(112,176,255,.30)');
+  ag.addColorStop(0.35, 'rgba(90,150,235,.11)');
+  ag.addColorStop(1, 'rgba(70,130,220,0)');
+  ctx.fillStyle = ag;
+  ctx.beginPath(); ctx.arc(cx, cy, r * 1.19, 0, 2 * Math.PI); ctx.fill();
+
+  /* ocean */
+  ctx.beginPath(); path(sphere);
+  var og = ctx.createRadialGradient(cx - r * 0.28, cy - r * 0.32, r * 0.06, cx, cy, r * 1.05);
+  og.addColorStop(0, PALETTE.ocean0);
+  og.addColorStop(1, PALETTE.ocean1);
+  ctx.fillStyle = og; ctx.fill();
+
+  /* land under the valleys: Antarctica, and the islands too small to have been given a basin */
+  ctx.fillStyle = PALETTE.land;
+  ctx.strokeStyle = PALETTE.land;
+  ctx.lineWidth = 0.7;
+  var i, e;
+  for (i = 0; i < landSet.length; i++) {
+    if (!capVisible(landSet[i].cap)) continue;
+    ctx.beginPath(); trace(landSet[i], true);
+    ctx.fill(); ctx.stroke();
+  }
+
+  /* the valleys: the whole-world cut first, then whatever finer tiles are in, each over the last */
+  scene = composeScene(T, !fast);
+  if (opt.basins) {
+    var layers = [T].concat(scene.sets);
+    for (var li = 0; li < layers.length; li++) {
+      var S = layers[li];
+      ctx.lineWidth = 0.8;
+      for (i = 0; i < S.set.length; i++) {
+        e = S.set[i];
+        if (!capVisible(e.cap) || covered(e, scene)) continue;
+        ctx.beginPath(); trace(e, true);
+        ctx.fillStyle = e.fill; ctx.strokeStyle = e.fill;
+        ctx.fill(); ctx.stroke();          /* the stroke closes hairline seams between neighbours */
+      }
+      if (opt.edges && !fast && opt.shade) strokeLines(S.sub, 0.55, PALETTE.sub);
+      if (opt.edges) strokeLines(S.divide, fast ? 0.8 : 1.05, PALETTE.divide);
+      strokeLines(S.coast, 0.75, PALETTE.coast);
+    }
+  } else strokeLines(T.coast, 0.75, PALETTE.coast);
+
+  /* Where the tiles in view bring their own creeks and rivers, surveyed to the metre, the atlas's
+     generalised rivers would only run beside them a kilometre off, so they stand down. */
+  var ownWater = scene.sets.length > 0 && scene.sets.every(function (S) { return S.water.length > 0; });
+  if (opt.rivers && scene.sets.length) {
+    ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    for (var pass = 0; pass < 2; pass++) {
+      for (var wk = 0; wk < 2; wk++) {                    /* creeks under rivers, beds under both */
+        ctx.beginPath();
+        for (var si = 0; si < scene.sets.length; si++) {
+          var WS = scene.sets[si];
+          for (i = 0; i < WS.water.length; i++) {
+            e = WS.water[i];
+            if (e.river !== wk || (WS.level === 7 && scene.cov8[e.c4]) || !capVisible(e.cap)) continue;
+            if (!wk && fast) continue;
+            trace(e, false);
+          }
+        }
+        var ww = (wk ? 1.7 : 0.95) * (0.9 + 0.25 * Math.min(4, zoom / 16));
+        if (!pass) { ctx.lineWidth = ww + 1.6; ctx.strokeStyle = PALETTE.bed; }
+        else { ctx.lineWidth = ww; ctx.strokeStyle = PALETTE.river + (wk ? '1)' : '.92)'); }
+        ctx.stroke();
+      }
+    }
+    ctx.lineJoin = 'miter'; ctx.lineCap = 'butt';
+  }
+  if (opt.rivers && !ownWater) {
+    /* the great rivers at any distance, the rest as the zoom earns them */
+    var maxRank = fast ? Math.min(5, 2.5 + zoom * 1.4) : 2.5 + zoom * 1.4;
+    var bands = [[0, 2, 2.0, 1], [3, 4, 1.5, 1], [5, 6, 1.15, .95], [7, 8, 0.95, .9], [9, 12, 0.8, .85]];
+    var grow = 0.8 + 0.2 * Math.min(3, zoom);
+    ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    for (var b = bands.length - 1; b >= 0; b--) {
+      if (bands[b][0] > maxRank) continue;
+      ctx.beginPath();
+      for (i = 0; i < riverSet.length; i++) {
+        e = riverSet[i];
+        if (e.s < bands[b][0] || e.s > bands[b][1] || e.s > maxRank) continue;
+        if (e.lake && !opt.lakes) continue;
+        if (!capVisible(e.cap)) continue;
+        trace(e, false);
+      }
+      /* a dark bed under a pale thread, so a river reads on a light valley and a dark one alike */
+      ctx.lineWidth = bands[b][2] * grow + 1.5; ctx.strokeStyle = PALETTE.bed; ctx.stroke();
+      ctx.lineWidth = bands[b][2] * grow; ctx.strokeStyle = PALETTE.river + bands[b][3] + ')'; ctx.stroke();
+    }
+    ctx.lineJoin = 'miter'; ctx.lineCap = 'butt';
+  }
+
+  if (opt.lakes) {
+    var minLake = 2e-5 / (zoom * zoom);
+    ctx.fillStyle = PALETTE.lake;
+    ctx.beginPath();
+    for (i = 0; i < lakeSet.length; i++) {
+      if (lakeSet[i].area < minLake || !capVisible(lakeSet[i].cap)) continue;
+      trace(lakeSet[i], true);
+    }
+    ctx.fill();
+  }
+
+  if (opt.co && !fast) {
+    ctx.setLineDash([4, 3]);
+    ctx.beginPath(); path(borders);
+    ctx.lineWidth = 0.9; ctx.strokeStyle = PALETTE.border; ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  /* what is under the pointer: the whole basin lifted, the valley itself ringed */
+  var hm = highlightMain !== null ? highlightMain : (hoverUnit ? hoverUnit.m : null);
+  if (hm !== null && opt.basins && !fast) {
+    ctx.save();
+    var ol = outlineOf(T, hm);      /* from the whole-world cut: a tile holds only part of a basin */
+    ctx.beginPath(); path(ol);
+    ctx.lineWidth = 3.4; ctx.strokeStyle = 'rgba(4,10,24,.55)'; ctx.stroke();
+    ctx.lineWidth = 1.7; ctx.strokeStyle = 'rgba(255,255,255,.95)'; ctx.stroke();
+    if (hoverUnit && highlightMain === null) {
+      ctx.beginPath(); path(hoverUnit.g);
+      ctx.fillStyle = 'rgba(255,255,255,.20)'; ctx.fill();
+      ctx.lineWidth = 1.1; ctx.strokeStyle = 'rgba(255,255,255,.85)'; ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  if (opt.grat) {
+    ctx.beginPath(); path(graticule);
+    ctx.lineWidth = 0.55; ctx.strokeStyle = PALETTE.grat; ctx.stroke();
+
+    ctx.setLineDash([3, 4]);
+    ctx.lineWidth = 0.8;
+    ctx.strokeStyle = 'rgba(255,224,168,.24)';
+    ctx.beginPath(); path(TROPIC_N); ctx.stroke();
+    ctx.beginPath(); path(TROPIC_S); ctx.stroke();
+    ctx.strokeStyle = 'rgba(178,218,255,.22)';
+    ctx.beginPath(); path(POLAR_N); ctx.stroke();
+    ctx.beginPath(); path(POLAR_S); ctx.stroke();
+    ctx.setLineDash([]);
+
+    ctx.beginPath(); path(EQUATOR);
+    ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(198,226,255,.32)'; ctx.stroke();
+  }
+
+  /* spherical shading + rim */
+  ctx.save();
+  ctx.beginPath(); path(sphere); ctx.clip();
+  var shade = ctx.createRadialGradient(cx - r * 0.34, cy - r * 0.38, r * 0.12, cx, cy, r * 1.02);
+  shade.addColorStop(0, 'rgba(255,255,255,.055)');
+  shade.addColorStop(0.55, 'rgba(0,0,0,0)');
+  shade.addColorStop(1, 'rgba(0,0,0,.50)');
+  ctx.fillStyle = shade; ctx.fillRect(0, 0, W, H);
+  ctx.restore();
+
+  ctx.beginPath(); path(sphere);
+  ctx.lineWidth = 1; ctx.strokeStyle = PALETTE.rim; ctx.stroke();
+
+  var shown = Math.max(T.level, scene.finest);
+  if (shown !== lastLevel) { lastLevel = shown; updateStats(); }
+  labelBoxes = [];
+  if (!fast && opt.basins) drawValleyLabels(T);
+  if (opt.cities) drawCities(); else cityPts = [];
+}
+
+function hits(boxes, box) {
+  for (var b = 0; b < boxes.length; b++) {
+    var o = boxes[b];
+    if (box[0] < o[0] + o[2] && box[0] + box[2] > o[0] &&
+        box[1] < o[1] + o[3] && box[1] + box[3] > o[1]) return true;
+  }
+  return false;
+}
+
+/* What the valley names have claimed this frame; the cities are laid out afterwards round them. */
+var labelBoxes = [];
+
+function stamp(t, x, y, font, colour, halo) {
+  ctx.font = font;
+  ctx.lineWidth = halo || 3;
+  ctx.strokeStyle = 'rgba(3,8,18,.70)';
+  ctx.strokeText(t, x, y);
+  ctx.fillStyle = colour;
+  ctx.fillText(t, x, y);
+}
+
+function drawValleyLabels(T) {
+  var centre = [-rotation[0], -rotation[1]];
+  var i, p, w, box;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.lineJoin = 'round';
+
+  /* the basins, by the name of the river at the mouth: about a dozen at the world view */
+  if (opt.bnames) {
+    var minA = (W < 700 ? 1.5e6 : 7.5e5) / Math.pow(zoom, 2.35);
+    for (i = 0; i < MAIN_LIST.length; i++) {
+      var m = MAIN_LIST[i];
+      if (m.area < minA) break;                       /* largest first, so nothing further on qualifies */
+      if (!m.name || !m.anchor) continue;
+      if (d3.geoDistance(m.anchor, centre) > 1.2) continue;
+      p = projection(m.anchor);
+      if (!p || p[0] < 30 || p[0] > W - 30 || p[1] < 20 || p[1] > H - 20) continue;
+      /* size follows how large the basin stands on the screen, not its rank */
+      var px = Math.sqrt(m.area) / 6371 * R0 * zoom;
+      var size = Math.max(11.5, Math.min(19, 8 + px * 0.05));
+      var font = 'italic 500 ' + size.toFixed(1) + 'px ' + SERIF;
+      ctx.font = font;
+      w = ctx.measureText(m.name).width;
+      box = [p[0] - w / 2 - 4, p[1] - size * 0.62, w + 8, size * 1.24];
+      if (hits(labelBoxes, box)) continue;
+      labelBoxes.push(box);
+      stamp(m.name, p[0], p[1], font, 'rgba(255,255,255,.96)', 3.4);
+    }
+  }
+
+  /* and the tributaries, once there is room for them */
+  if (opt.tnames && opt.shade) {
+    var minU = (W < 700 ? 9e5 : 2.6e5) / Math.pow(zoom, 2.2);
+    var tf = '500 10.5px ' + FONT;
+    var layers = [T].concat(scene.sets);
+    for (var li = layers.length - 1; li >= 0; li--) {
+      var S = layers[li];
+      for (i = 0; i < S.set.length; i++) {
+        var e = S.set[i];
+        if (e.area < minU) break;
+        if (!e.lab || !capVisible(e.cap) || covered(e, scene)) continue;
+        if (!e.cent) e.cent = d3.geoCentroid(e.g);
+        if (d3.geoDistance(e.cent, centre) > 1.2) continue;
+        p = projection(e.cent);
+        if (!p || p[0] < 30 || p[0] > W - 30 || p[1] < 20 || p[1] > H - 20) continue;
+        ctx.font = tf;
+        w = ctx.measureText(e.name).width;
+        box = [p[0] - w / 2 - 3, p[1] - 7, w + 6, 14];
+        if (hits(labelBoxes, box)) continue;
+        labelBoxes.push(box);
+        stamp(e.name, p[0], p[1], tf, 'rgba(236,243,252,.90)', 3);
+      }
+    }
+  }
+  ctx.lineJoin = 'miter';
+}
+
+function drawCities() {
+  var centre = [-rotation[0], -rotation[1]];
+  cityPts = [];
+  var labelMin = (W < 700 ? 8e6 : 4e6) / Math.pow(zoom, 1.9);
+  var boxes = labelBoxes.slice();
+  var i, c, p, dist;
+
+  var minPop = (W < 700 ? 4e6 : 3e6) / Math.pow(zoom, 1.6);
+  var adminZoom = W < 700 ? 2.4 : 1.9;
+  for (i = 0; i < cities.length; i++) {
+    c = cities[i];
+    if (c.rank < 2 && c.pop < minPop && !(c.rank === 1 && zoom >= adminZoom)) continue;
+    if (c.rank === 2 && c.pop < minPop / 4 && zoom < adminZoom * 1.5) continue;
+    dist = d3.geoDistance([c.lon, c.lat], centre);
+    if (dist > 1.5533) continue;                      /* ~89 degrees */
+    p = projection([c.lon, c.lat]);
+    if (!p) continue;
+    if (p[0] < -30 || p[0] > W + 30 || p[1] < -30 || p[1] > H + 30) continue;
+    var edge = 1 - Math.min(1, dist / 1.5533);
+    var rad = c.pop >= 1e7 ? 2.6 : c.pop >= 4e6 ? 2.2 : c.pop >= 1e6 ? 1.9 : 1.6;
+    rad *= (0.85 + 0.35 * Math.min(1, zoom / 3));
+    cityPts.push({ c: c, x: p[0], y: p[1] });
+
+    ctx.globalAlpha = 0.30 + 0.70 * Math.min(1, edge * 3.2);
+    ctx.beginPath(); ctx.arc(p[0], p[1], rad + 1.2, 0, 2 * Math.PI);
+    ctx.fillStyle = 'rgba(6,12,26,.70)'; ctx.fill();
+    ctx.beginPath(); ctx.arc(p[0], p[1], rad, 0, 2 * Math.PI);
+    ctx.fillStyle = '#ffffff'; ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+
+  if (interacting) return;
+
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.lineJoin = 'round';
+  for (i = 0; i < cityPts.length; i++) {
+    var cp = cityPts[i];
+    boxes.push([cp.x - 3.5, cp.y - 3.5, 7, 7]);
+    var isHover = hoverCity && hoverCity.c === cp.c;
+    var ep = Math.max(cp.c.pop, cp.c.rank === 2 ? 1.4e6 : cp.c.rank === 1 ? 0.7e6 : 0);
+    if (!(isHover || (opt.names && ep >= labelMin))) continue;
+
+    ctx.font = '500 10.5px ' + FONT;
+    var wpx = ctx.measureText(cp.c.name).width;
+    var spots = [[cp.x + 7, cp.y - 0.5],
+                 [cp.x - 7 - wpx, cp.y - 0.5],
+                 [cp.x - wpx / 2, cp.y - 13],
+                 [cp.x - wpx / 2, cp.y + 13]];
+    var tx = 0, ty = 0, box = null, sp;
+    for (sp = 0; sp < spots.length; sp++) {
+      var sx = spots[sp][0], sy = spots[sp][1];
+      if (sx < 8 || sx + wpx > W - 8 || sy < 12 || sy > H - 12) continue;
+      var nbox = [sx - 2, sy - 7, wpx + 4, 13];
+      if (!isHover && hits(boxes, nbox)) continue;
+      tx = sx; ty = sy; box = nbox;
+      break;
+    }
+    if (!box) continue;
+    boxes.push(box);
+    ctx.lineWidth = 3.2;
+    ctx.strokeStyle = 'rgba(3,8,18,.72)';
+    ctx.strokeText(cp.c.name, tx, ty);
+    ctx.fillStyle = isHover ? '#ffffff' : 'rgba(233,240,250,.88)';
+    ctx.fillText(cp.c.name, tx, ty);
+  }
+  ctx.lineJoin = 'miter';
+}
+
+/* --------------------------------------------------------------- hit test */
+function inBox(b, lon, lat) {
+  return lon >= b[0] - 0.001 && lon <= b[2] + 0.001 && lat >= b[1] - 0.001 && lat <= b[3] + 0.001;
+}
+function unitAt(lonlat, T) {
+  var i, e;
+  if (!T) {
+    for (var s = scene.sets.length - 1; s >= 0; s--) {     /* finest first */
+      var S = scene.sets[s];
+      if (!inBox(S.box, lonlat[0], lonlat[1])) continue;
+      for (i = S.set.length - 1; i >= 0; i--) {
+        e = S.set[i];
+        if (covered(e, scene) || !inBox(e.box, lonlat[0], lonlat[1])) continue;
+        if (d3.geoContains(e.g, lonlat)) return e;
+      }
+    }
+    T = currentTier();
+  }
+  for (i = T.set.length - 1; i >= 0; i--) {          /* smallest first: a small valley's box is the better filter */
+    e = T.set[i];
+    if (!inBox(e.box, lonlat[0], lonlat[1])) continue;
+    if (d3.geoContains(e.g, lonlat)) return e;
+  }
+  return null;
+}
+function countryAt(lonlat) {
+  for (var i = 0; i < landSet.length; i++) {
+    if (!inBox(landSet[i].box, lonlat[0], lonlat[1])) continue;
+    if (d3.geoContains(landSet[i].g, lonlat)) return landSet[i].g;
+  }
+  return null;
+}
+function cityAt(mx, my) {
+  var reach = coarsePointer ? 22 : 12;
+  var best = null, bd = reach * reach;
+  for (var i = 0; i < cityPts.length; i++) {
+    var p = cityPts[i];
+    var d = (p.x - mx) * (p.x - mx) + (p.y - my) * (p.y - my);
+    if (d < bd) { bd = d; best = p; }
+  }
+  return best;
+}
+
+/* ---------------------------------------------------------------- tooltip */
+var tip = document.getElementById('tip');
+var tipKey = null, tipAt = [0, 0];
+
+function placeTip(mx, my) {
+  tipAt = [mx, my];
+  var w = tip.offsetWidth, h = tip.offsetHeight;
+  var x = mx + 18, y = my - h - 14;
+  if (x + w > W - 10) x = mx - w - 18;
+  if (y < 10) y = my + 20;
+  if (y + h > H - 10) y = H - h - 10;
+  if (coarsePointer) {
+    x = clamp(mx - w / 2, 8, Math.max(8, W - w - 8));
+    y = my - h - 30;
+    if (y < 8) y = Math.min(my + 30, H - h - 8);
+  }
+  tip.style.transform = 'translate(' + Math.round(x) + 'px,' + Math.round(y) + 'px)';
+}
+
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (m) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[m]; }); }
+function km2(a) { return Math.round(a).toLocaleString('en-AU') + '&nbsp;km&sup2;'; }
+
+/* The river path as the card shows it: the mouth's river first, then each river met on the way up.
+   A slash is a confluence - what follows is a tributary of what came before. An angle is the same water
+   under another name. A valley whose stream no gazetteer names ends the path as [unnamed]. */
+function pathHtml(path) {
+  if (!path) return '';
+  var out = '', parts = path.split(/([\/>])/);
+  for (var i = 0; i < parts.length; i++) {
+    var t = parts[i], lastOne = i === parts.length - 1;
+    if (t === '/') out += '<span class="sep">/</span>';
+    else if (t === '>') out += '<span class="sep ren">&gt;</span>';
+    else out += (lastOne ? '<b>' : '') + (t === '?' ? '[unnamed]' : esc(t)) + (lastOne ? '</b>' : '');
+  }
+  return out;
+}
+function chainOf(e) { return e.path ? e.path.split(/[\/>]/) : []; }
+function mouthLine(m) {
+  if (m.endo) return '<small>No way to the sea</small>' + (m.sink ? 'Ends inland at ' + esc(m.sink) : 'Ends in an inland sink');
+  return '<small>Reaches the sea at</small>' + (m.sink ? esc(m.sink) : 'the coast');
+}
+function unitTipHtml(e, country) {
+  var m = e.main, chain = chainOf(e);
+  var head, sub;
+  if (m.lump) {
+    head = 'Coastal valleys';
+    sub = m.rivers.length ? 'including the ' + esc(m.rivers.join(', ')) : 'many short rivers, each with its own mouth';
+  } else {
+    var ends = /[\/]\?$/.test(e.path);
+    head = e.name || (ends ? 'Unnamed tributary' : (m.endo ? 'Inland basin' : 'Unnamed valley'));
+    sub = pathHtml(e.path);
+    if (e.name && e.path === e.name && e.name === m.name && m.n > 1) sub += ' <span class="sep">&middot;</span> main stem';
+  }
+  var share = m.area ? e.area / m.area : 1;
+  var rows = [];
+  if (m.n > 1 || !m.lump) rows.push('This valley <b>' + km2(e.area) + '</b>' + (share < 0.995 ? ' &middot; ' + (share * 100 < 1 ? '&lt;1' : Math.round(share * 100)) + '% of the basin' : ''));
+  if (e.up > e.area * 1.02) rows.push('Gathers <b>' + km2(e.up) + '</b> by the time it leaves');
+  if (share < 0.995) rows.push((m.name ? esc(m.name) + (/basin$/.test(m.name) ? '' : ' basin') : 'Whole basin') + ' <b>' + km2(m.area) + '</b>');
+  return '<div class="tn"><i style="background:' + e.fill + '"></i>' + esc(head) + '</div>' +
+    (sub ? '<div class="tc' + (m.lump ? '' : ' path') + '">' + sub + '</div>' : '') +
+    '<div class="tt">' + mouthLine(m) + '</div>' +
+    '<div class="td">' + rows.join('<br>') + '</div>' +
+    '<div class="tzline">' + (country ? esc(country.properties.n) + ' &middot; ' : '') + 'level ' + e.level + ' &middot; Pfafstetter ' + e.p + '</div>';
+}
+function showUnitTip(e, country, mx, my) {
+  var kk = 'u' + e.p + (country ? country.properties.n : '');
+  if (kk === tipKey) { placeTip(mx, my); return; }
+  tipKey = kk;
+  tip.innerHTML = unitTipHtml(e, country);
+  tip.classList.add('on');
+  tip.classList.toggle('touch', coarsePointer);
+  placeTip(mx, my);
+}
+function showCityTip(cp, mx, my, force) {
+  var c = cp.c;
+  var key = 'c' + c.name + c.country;
+  if (key === tipKey && !force) { placeTip(mx, my); return; }
+  tipKey = key;
+  var e = unitAt([c.lon, c.lat]);
+  var where = '';
+  if (e) {
+    where = '<div class="tt"><small>Stands in the valley of</small>' + (e.main.lump ? 'Coastal valleys' : (e.path ? '<span class="path">' + pathHtml(e.path) + '</span>' : 'an unnamed river')) + '</div>' +
+            '<div class="td">' + mouthLine(e.main).replace(/<small>.*<\/small>/, function (s) { return s.replace(/<\/?small>/g, '') + ' '; }) + '</div>';
+  }
+  tip.innerHTML =
+    '<div class="tn">' + esc(c.name) + '</div>' +
+    '<div class="tc">' + (c.state ? esc(c.state).toUpperCase() + ', ' : '') + esc(c.country).toUpperCase() +
+      (c.rank === 2 ? ' &middot; CAPITAL' : '') + '</div>' + where;
+  tip.classList.add('on');
+  addTipGo(cp);
+  placeTip(mx, my);
+}
+function addTipGo(cp) {
+  tip.classList.toggle('touch', coarsePointer);
+  if (!coarsePointer || !cp) return;
+  var el = document.createElement('div');
+  el.className = 'tgo';
+  el.innerHTML = '<button class="btn" id="tipgo">Fly to</button><span>or tap again to fly there</span>';
+  tip.appendChild(el);
+  el.querySelector('#tipgo').addEventListener('click', function (ev) {
+    ev.stopPropagation();
+    flyTo(cp.c.lon, cp.c.lat);
+  });
+}
+function hideTip() { tip.classList.remove('on'); tipKey = null; }
+
+/* ------------------------------------------------------------ interaction */
+var pointers = {}, dragStart = null, pinch = null, moved = false;
+var idleTimer = null;
+var spinV = [0, 0], momRaf = null;
+
+function stopMomentum() { cancelAnimationFrame(momRaf); momRaf = null; spinV = [0, 0]; }
+function startMomentum() {
+  if (Math.abs(spinV[0]) + Math.abs(spinV[1]) < 0.004) { spinV = [0, 0]; return; }
+  cancelAnimationFrame(momRaf);
+  var last = performance.now();
+  (function tick(t) {
+    var dt = Math.min(48, t - last); last = t;
+    rotation = [rotation[0] + spinV[0] * dt, clamp(rotation[1] + spinV[1] * dt, -90, 90), 0];
+    var decay = Math.pow(0.9958, dt);
+    spinV[0] *= decay; spinV[1] *= decay;
+    if (Math.abs(spinV[0]) + Math.abs(spinV[1]) > 0.0011) {
+      markInteract(); draw();
+      momRaf = requestAnimationFrame(tick);
+    } else {
+      momRaf = null; spinV = [0, 0];
+      interacting = false; draw();
+    }
+  })(performance.now());
+}
+
+function markInteract() {
+  interacting = true;
+  clearTimeout(idleTimer);
+  idleTimer = setTimeout(function () { interacting = false; draw(); }, 160);
+}
+
+cv.addEventListener('pointerdown', function (e) {
+  cv.setPointerCapture(e.pointerId);
+  pointers[e.pointerId] = [e.clientX, e.clientY];
+  var ids = Object.keys(pointers);
+  moved = false;
+  stopMomentum();
+  if (ids.length === 1) {
+    dragStart = { x: e.clientX, y: e.clientY, rot: rotation.slice(), lastT: 0, lastRot: rotation.slice() };
+    cv.classList.add('dragging');
+  } else if (ids.length === 2) {
+    pinch = { d: dist2(pointers[ids[0]], pointers[ids[1]]), zoom: zoom };
+    dragStart = null;
+  }
+  fadeHint();
+});
+
+function dist2(a, b) { return Math.hypot(a[0] - b[0], a[1] - b[1]); }
+
+cv.addEventListener('pointermove', function (e) {
+  if (pointers[e.pointerId]) pointers[e.pointerId] = [e.clientX, e.clientY];
+  var ids = Object.keys(pointers);
+
+  if (ids.length === 2 && pinch) {
+    var nd = dist2(pointers[ids[0]], pointers[ids[1]]);
+    zoom = clamp(pinch.zoom * (nd / pinch.d), 0.82, ZMAX);
+    markInteract(); draw();
+    return;
+  }
+  if (dragStart && ids.length === 1) {
+    var k = 57.29578 / (R0 * zoom) * 1.0;
+    var dx = e.clientX - dragStart.x, dy = e.clientY - dragStart.y;
+    if (!moved && Math.abs(dx) + Math.abs(dy) <= 3) return;
+    moved = true;
+    rotation = [
+      dragStart.rot[0] + dx * k * 1.35,
+      clamp(dragStart.rot[1] - dy * k * 1.35, -90, 90),
+      0
+    ];
+    var tnow = performance.now();
+    if (dragStart.lastT) {
+      var span = Math.max(8, tnow - dragStart.lastT);
+      spinV[0] = spinV[0] * 0.6 + ((rotation[0] - dragStart.lastRot[0]) / span) * 0.4;
+      spinV[1] = spinV[1] * 0.6 + ((rotation[1] - dragStart.lastRot[1]) / span) * 0.4;
+    }
+    dragStart.lastT = tnow; dragStart.lastRot = rotation.slice();
+    hideTip(); hoverCity = null; hoverUnit = null;
+    markInteract(); draw();
+    return;
+  }
+  hover(e.clientX, e.clientY);
+});
+
+function endPointer(e) {
+  delete pointers[e.pointerId];
+  if (Object.keys(pointers).length < 2) pinch = null;
+  if (Object.keys(pointers).length === 0) { dragStart = null; cv.classList.remove('dragging'); }
+}
+cv.addEventListener('pointerup', function (e) {
+  var wasMoved = moved;
+  var stale = dragStart && performance.now() - dragStart.lastT > 90;
+  endPointer(e);
+  if (wasMoved) { if (stale) spinV = [0, 0]; else startMomentum(); return; }
+  spinV = [0, 0];
+  if (smallScreen() && document.querySelector('.panel:not(.min)')) { foldPanels(null); return; }
+  var cp = opt.cities ? cityAt(e.clientX, e.clientY) : null;
+  if (e.pointerType === 'touch') {
+    /* A touch screen has no hover, so one tap does the looking and a second does the going. */
+    interacting = false;
+    if (cp) {
+      var same = hoverCity && hoverCity.c === cp.c && tip.classList.contains('on');
+      if (same) { flyTo(cp.c.lon, cp.c.lat); return; }
+      hoverCity = cp; hoverUnit = null; spinPaused = true;
+      draw(); showCityTip(cp, e.clientX, e.clientY, true);
+      return;
+    }
+    if (hoverCity || hoverUnit || tip.classList.contains('on')) {
+      hoverCity = null; hoverUnit = null; hideTip(); spinPaused = false; draw();
+      return;
+    }
+    if (Math.hypot(e.clientX - CX, e.clientY - CY) <= R0 * zoom) {
+      spinPaused = true;
+      draw(); doHover(e.clientX, e.clientY);
+      if (!hoverUnit) spinPaused = false;
+      return;
+    }
+    if (opt.spin) spinPaused = !spinPaused;
+    draw();
+    return;
+  }
+  if (cp) { flyTo(cp.c.lon, cp.c.lat); return; }
+  /* A click on the globe pauses the spin, and clicking again restarts it. */
+  if (opt.spin) { spinPaused = !spinPaused; }
+});
+cv.addEventListener('pointercancel', endPointer);
+cv.addEventListener('pointerleave', function (e) {
+  endPointer(e);
+  if (e.pointerType === 'touch') return;
+  hideTip(); hoverCity = null;
+  if (hoverUnit) { hoverUnit = null; draw(); }
+});
+
+cv.addEventListener('wheel', function (e) {
+  e.preventDefault();
+  var f = Math.exp(-e.deltaY * (e.deltaMode === 1 ? 0.10 : 0.0034));      /* a notch is a good third again, so the creeks are a dozen notches from the world */
+  zoom = clamp(zoom * f, 0.82, ZMAX);
+  markInteract(); draw(); fadeHint();
+}, { passive: false });
+
+cv.addEventListener('dblclick', function (e) {
+  var ll = projection.invert([e.clientX, e.clientY]);
+  if (ll) flyTo(ll[0], ll[1], Math.min(ZMAX, zoom * 2.4));
+});
+
+function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
+
+var coarsePointer = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+var hoverRaf = null, lastHover = [0, 0];
+function hover(mx, my) {
+  lastHover = [mx, my];
+  if (hoverRaf) return;
+  hoverRaf = requestAnimationFrame(function () {
+    hoverRaf = null;
+    doHover(lastHover[0], lastHover[1]);
+  });
+}
+
+function doHover(mx, my) {
+  var cp = opt.cities ? cityAt(mx, my) : null;
+  if (cp) {
+    if (!hoverCity || hoverCity.c !== cp.c) { hoverCity = cp; hoverUnit = null; showCityTip(cp, mx, my, true); draw(); }
+    else { hoverCity = cp; showCityTip(cp, mx, my); }
+    cv.style.cursor = 'pointer';
+    return;
+  }
+  cv.style.cursor = '';
+  var had = hoverCity; hoverCity = null;
+
+  var d = Math.hypot(mx - CX, my - CY);
+  var ll = d > R0 * zoom ? null : projection.invert([mx, my]);
+  var e = ll && opt.basins ? unitAt(ll) : null;
+  if (!e) {
+    hideTip();
+    if (hoverUnit || had) { hoverUnit = null; draw(); }
+    return;
+  }
+  var changed = e !== hoverUnit;
+  hoverUnit = e;
+  showUnitTip(e, countryAt(ll), mx, my);
+  if (changed || had) draw();
+}
+
+/* --------------------------------------------------------------- fly-to */
+var flying = null;
+function flyTo(lon, lat, targetZoom) {
+  stopMomentum();
+  var from = rotation.slice(), to = [-lon, -lat, 0];
+  var dl = ((to[0] - from[0] + 540) % 360) - 180;
+  var z0 = zoom, z1 = targetZoom === undefined ? Math.max(zoom, 1.8) : targetZoom;
+  var t0 = performance.now(), dur = 950;
+  if (flying) cancelAnimationFrame(flying);
+  hideTip();
+  (function step(t) {
+    var u = Math.min(1, (t - t0) / dur);
+    var e = u < 0.5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
+    rotation = [from[0] + dl * e, from[1] + (to[1] - from[1]) * e, 0];
+    zoom = z0 + (z1 - z0) * e;
+    interacting = u < 1;
+    draw();
+    if (u < 1) flying = requestAnimationFrame(step); else flying = null;
+  })(performance.now());
+}
+/* a zoom that sets a basin comfortably inside the window */
+function zoomForArea(a) { return clamp(1.15 / Math.max(0.09, Math.sqrt(a) / 6371 * 1.5), 1, 8); }
+
+function resetView() {
+  var off = -new Date().getTimezoneOffset() / 60;
+  flyTo(off * 15, 14, 1);
+}
+
+/* --------------------------------------------------------------- controls */
+Object.keys(opt).forEach(function (key) {
+  var el = document.getElementById('L-' + key);
+  el.checked = opt[key];
+  el.addEventListener('change', function () {
+    opt[key] = el.checked;
+    if (key === 'names' && opt.names && !opt.cities) {
+      opt.cities = true; document.getElementById('L-cities').checked = true;
+    }
+    if (key === 'cities' && !opt.cities && opt.names) {
+      opt.names = false; document.getElementById('L-names').checked = false;
+    }
+    if (key === 'shade' || key === 'inland') repaint();
+    if (key === 'spin') { spinPaused = false; if (opt.spin) startSpin(); }
+    hideTip();
+    draw();
+  });
+});
+
+var spinRaf = null, spinLast = 0, spinPaused = false;
+function startSpin() {
+  cancelAnimationFrame(spinRaf);
+  spinLast = performance.now();
+  (function tick(t) {
+    if (!opt.spin) { spinRaf = null; return; }
+    var dt = t - spinLast; spinLast = t;
+    /* a valley being read holds the globe still, or it would slide out from under the pointer */
+    if (!dragStart && !flying && !spinPaused && !hoverUnit && !hoverCity && highlightMain === null) {
+      rotation[0] = (rotation[0] + dt * 0.0042) % 360; draw();
+    }
+    spinRaf = requestAnimationFrame(tick);
+  })(performance.now());
+}
+
+document.getElementById('resetview').addEventListener('click', function () { resetView(); });
+document.getElementById('resetfloat').addEventListener('click', function (e) { e.stopPropagation(); resetView(); });
+
+/* ----------------------------------------------------------------- legend */
+function buildLegend() {
+  var hr = document.getElementById('hueramp');
+  hr.innerHTML = '';
+  for (var h = 0; h < 360; h += 15) {
+    if (h >= 185 && h <= 265) continue;                 /* blue is kept for water */
+    var d = document.createElement('div');
+    d.style.background = css([h, 50, 63]);
+    hr.appendChild(d);
+  }
+  var demo = { hue: 150, k: 0, endo: false };
+  function ramp(id, digits) {
+    var el = document.getElementById(id);
+    el.innerHTML = '';
+    digits.forEach(function (dg) {
+      var c = document.createElement('div');
+      c.style.background = css(unitHcl(dg, demo, true, false));
+      c.title = 'Pfafstetter digit ' + dg;
+      el.appendChild(c);
+    });
+  }
+  ramp('stemramp', [1, 3, 5, 7, 9]);
+  ramp('tribramp', [2, 4, 6, 8]);
+
+  var bl = document.getElementById('biglist');
+  bl.innerHTML = '';
+  MAIN_LIST.slice(0, 40).forEach(function (m) {
+    if (!m.name || !m.anchor) return;
+    var b = document.createElement('div');
+    b.className = 'b';
+    b.innerHTML = '<i style="background:' + css(unitHcl(0, m, false, opt.inland)) + '"></i><span>' + esc(m.name) + '</span>' +
+                  '<span class="ar">' + (m.area / 1e6).toFixed(2) + ' M km&sup2;</span>';
+    b.addEventListener('mouseenter', function () { highlightMain = m.id; draw(); });
+    b.addEventListener('mouseleave', function () { highlightMain = null; draw(); });
+    b.addEventListener('click', function () { flyTo(m.anchor[0], m.anchor[1], zoomForArea(m.area)); });
+    bl.appendChild(b);
+  });
+}
+
+function updateStats() {
+  document.getElementById('st-mains').textContent = D.counts.sea.toLocaleString('en-AU');
+  document.getElementById('st-mains2').textContent = 'and ' + D.counts.inland.toLocaleString('en-AU') + ' inland sinks';
+  var lvl = lastLevel || 4;
+  document.getElementById('st-units').textContent = (D.counts.levels[String(lvl)] || 0).toLocaleString('en-AU');
+  document.getElementById('st-units2').textContent = 'level ' + lvl + (lvl < 8 ? ' · zoom for more' : ' · finest cut');
+  document.getElementById('legend-level').textContent = 'level ' + lvl;
+}
+
+/* ----------------------------------------------------------------- search */
+var q = document.getElementById('q'), results = document.getElementById('results');
+var selIdx = -1, matches = [];
+
+/* rivers first - the basins by their mouths, then every named river on the map - and then the cities */
+var searchList = [];
+(function () {
+  MAIN_LIST.forEach(function (m) {
+    if (m.name && m.anchor) searchList.push({ name: m.name, kind: (m.endo ? 'inland basin' : 'basin') + (m.sink ? ' · ' + m.sink : ''), lon: m.anchor[0], lat: m.anchor[1], zoom: zoomForArea(m.area), w: 3e9 + m.area });
+  });
+  var seen = {};
+  riverSet.forEach(function (r) {
+    if (!r.n) return;
+    var c = d3.geoCentroid(r.g);
+    var k = r.n + '|' + Math.round(c[0] / 12) + '|' + Math.round(c[1] / 12);
+    if (seen[k]) return; seen[k] = 1;
+    searchList.push({ name: r.n, kind: 'river', lon: c[0], lat: c[1], zoom: 3.6, w: 2e9 - r.s * 1e6, river: true });
+  });
+  cities.forEach(function (c) { searchList.push({ name: c.name, kind: c.country, lon: c.lon, lat: c.lat, zoom: 3, w: c.pop, city: c }); });
+})();
+function fold(s) { return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, ''); }
+searchList.forEach(function (s) { s.f = fold(s.name); });
+
+function runSearch() {
+  var v = fold(q.value.trim());
+  results.innerHTML = ''; selIdx = -1;
+  if (v.length < 2) { results.classList.remove('on'); matches = []; return; }
+  var a = searchList.filter(function (s) { return s.f.indexOf(v) === 0; });
+  var b = searchList.filter(function (s) { return s.f.indexOf(v) > 0; });
+  a.sort(function (x, y) { return y.w - x.w; });
+  b.sort(function (x, y) { return y.w - x.w; });
+  matches = a.concat(b);
+  var seen = {};
+  matches = matches.filter(function (s) {
+    /* a river that names a basin is already in the list as the basin */
+    var k = s.f + '|' + (s.city ? s.kind : Math.round(s.lon / 12) + ',' + Math.round(s.lat / 12));
+    if (seen[k]) return false; seen[k] = 1; return true;
+  }).slice(0, 24);
+  if (!matches.length) { results.classList.remove('on'); return; }
+  matches.forEach(function (s, i) {
+    var el = document.createElement('div');
+    el.className = 'r';
+    el.innerHTML = '<span class="nm">' + esc(s.name) + '</span><span class="ct">' + esc(s.kind) + '</span>';
+    el.addEventListener('click', function () { choose(i); });
+    results.appendChild(el);
+  });
+  results.classList.add('on');
+}
+function choose(i) {
+  var s = matches[i];
+  if (!s) return;
+  results.classList.remove('on');
+  q.value = s.name;
+  q.blur();
+  flyTo(s.lon, s.lat, Math.max(s.zoom, Math.min(zoom, 4)));
+  setTimeout(function () {
+    var p = projection([s.lon, s.lat]);
+    if (!p) return;
+    if (s.city) { hoverCity = { c: s.city, x: p[0], y: p[1] }; showCityTip(hoverCity, p[0], p[1], true); draw(); }
+    else { doHover(p[0], p[1]); }
+  }, 1050);
+}
+q.addEventListener('input', runSearch);
+q.addEventListener('keydown', function (e) {
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    var n = results.children.length; if (!n) return;
+    selIdx = (selIdx + (e.key === 'ArrowDown' ? 1 : n - 1)) % n;
+    for (var i = 0; i < n; i++) results.children[i].classList.toggle('sel', i === selIdx);
+  } else if (e.key === 'Enter') {
+    choose(selIdx < 0 ? 0 : selIdx);
+  } else if (e.key === 'Escape') {
+    results.classList.remove('on'); q.blur();
+  }
+});
+document.addEventListener('click', function (e) {
+  if (!document.getElementById('search').contains(e.target)) results.classList.remove('on');
+});
+
+/* ------------------------------------------------------------- keyboard */
+document.addEventListener('keydown', function (e) {
+  if (document.activeElement === q) return;
+  var step = (e.shiftKey ? 15 : 5) / Math.max(1, zoom * 0.6);
+  if (e.key === 'ArrowLeft') { rotation[0] -= step; draw(); }
+  else if (e.key === 'ArrowRight') { rotation[0] += step; draw(); }
+  else if (e.key === 'ArrowUp') { rotation[1] = clamp(rotation[1] + step, -90, 90); draw(); }
+  else if (e.key === 'ArrowDown') { rotation[1] = clamp(rotation[1] - step, -90, 90); draw(); }
+  else if (e.key === '+' || e.key === '=') { zoom = clamp(zoom * 1.4, 0.82, ZMAX); draw(); }
+  else if (e.key === '-' || e.key === '_') { zoom = clamp(zoom / 1.4, 0.82, ZMAX); draw(); }
+  else if (e.key === ' ') { e.preventDefault(); if (opt.spin) spinPaused = !spinPaused; }
+  else return;
+  fadeHint();
+});
+
+var hintEl = document.getElementById('hint'), hintGone = false;
+function fadeHint() {
+  if (hintGone) return;
+  hintGone = true;
+  setTimeout(function () { hintEl.style.opacity = 0; }, 400);
+}
+setTimeout(fadeHint, 9000);
+
+/* ------------------------------------------- panels fold away into corners */
+function smallScreen() {
+  return window.innerWidth <= 860 || window.innerHeight <= 520 ||
+         (coarsePointer && Math.min(window.innerWidth, window.innerHeight) <= 900);
+}
+function foldPanels(except) {
+  document.querySelectorAll('.panel').forEach(function (p) {
+    if (p !== except && !p.classList.contains('min')) {
+      p.classList.add('min');
+      var b = p.querySelector('.pmin');
+      if (b) b.title = 'Restore';
+    }
+  });
+  placePills();
+}
+(function panels() {
+  var small = smallScreen();
+  var list = document.querySelectorAll('.panel');
+  for (var i = 0; i < list.length; i++) {
+    var panel = list[i], btn = panel.querySelector('.pmin');
+    if (!btn) continue;
+    if (small) { panel.classList.add('min'); btn.title = 'Restore'; }
+    (function (p, b) {
+      b.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var min = p.classList.toggle('min');
+        b.title = min ? 'Restore' : 'Minimise';
+        if (!min && smallScreen()) foldPanels(p);
+        placePills();
+      });
+    })(panel, btn);
+  }
+})();
+
+/* ------------------------------------------------------------------ boot */
+buildTier(TIERS[0]);
+buildLegend();
+window.addEventListener('resize', resize);
+document.fonts && document.fonts.ready && document.fonts.ready.then(function () { draw(); placePills(); });
+resize();
+updateStats();
+
+/* open on the viewer's own meridian */
+(function () {
+  var off = -new Date().getTimezoneOffset() / 60;
+  rotation = [-off * 15 - 62, -46, 0];
+  zoom = 0.86;
+  draw();
+  setTimeout(function () { flyTo(off * 15, 14, 1); }, 260);
+  if (opt.spin) startSpin();
+  /* the second cut is wanted by almost anyone who zooms at all, so it comes in once the page has settled */
+  setTimeout(function () { loadTier(TIERS[1]); }, 1800);
+})();
+
+/* a window on the state, for checking behaviour from outside the page */
+window.RV = {
+  rotation: function () { return rotation.slice(); },
+  zoom: function () { return zoom; },
+  tier: function () { return 'l' + lastLevel; },
+  tiersLoaded: function () { return Object.keys(tiers); },
+  tilesLoaded: function () { return TILED.map(function (tl) { return Object.keys(tl.built).length; }); },
+  tilesPending: function () { return tileBusy + tileQueue.length; },
+  spinPaused: function () { return spinPaused; },
+  hoverUnit: function () { return hoverUnit ? { p: hoverUnit.p, name: hoverUnit.name, path: hoverUnit.path, main: hoverUnit.main.name, sink: hoverUnit.main.sink } : null; },
+  unitAt: function (lon, lat) { var e = unitAt([lon, lat]); return e ? { p: e.p, name: e.name, path: e.path, level: e.level, main: e.main.name, sink: e.main.sink, endo: e.main.endo, area: e.area, fill: e.fill, chain: chainOf(e) } : null; },
+  tipOn: function () { return tip.classList.contains('on'); },
+  tipHtml: function () { return tip.innerHTML; },
+  setView: function (lon, lat, z) { rotation = [-lon, -lat, 0]; if (z) zoom = z; draw(); },
+  flyTo: flyTo,
+  drawMs: function () { var t = performance.now(); draw(); return performance.now() - t; },
+  opt: opt
+};
+
+})();
+</script>
+</body>
+</html>
