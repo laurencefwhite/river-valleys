@@ -136,20 +136,23 @@ def name_units(attrs, ids, geoms, gidx):
     cache = os.path.join(WORK, 'names8.json')
     if os.path.exists(cache) and '--rename' not in sys.argv:
         j = json.load(open(cache, encoding='utf-8'))
-        water = pickle.load(open(os.path.join(WORK, 'water8.pkl'), 'rb')) if os.path.exists(os.path.join(WORK, 'water8.pkl')) else {}
         G.update(within={int(k): v for k, v in j.get('within', {}).items()}, joined={int(k): v for k, v in j.get('joined', {}).items()})
-        return {int(k): v for k, v in j['names'].items()}, {int(k): v for k, v in j['inside'].items()}, water
+        return {int(k): v for k, v in j['names'].items()}, {int(k): v for k, v in j['inside'].items()}
     hy2p = {d['HYBAS_ID']: p for p, d in attrs.items()}
     parts = sorted(glob.glob(os.path.join(OVT, 'part-*.parquet')))
     use_osm = bool(parts)
     print('names from', 'OpenStreetMap (Overture) + Natural Earth' if use_osm else 'Natural Earth only', flush=True)
     ne = load_lines_ne()
-    names, inside, present, water, weak = {}, {}, {}, {}, {}
+    names, inside, present, weak = {}, {}, {}, {}
+    wdir = os.path.join(WORK, 'water')
+    if os.path.isdir(wdir):
+        shutil.rmtree(wdir)
+    os.makedirs(wdir)
     within, joined = G['within'], G['joined']
     # by region, so that only a region's waterways are in memory at once
     regions = collections.defaultdict(list)
     for p in ids:
-        regions[str(p)[:2]].append(p)
+        regions[str(p)[:3]].append(p)
     if use_osm:
         import duckdb
         con = duckdb.connect()
@@ -173,6 +176,7 @@ def name_units(attrs, ids, geoms, gidx):
                 except Exception:
                     pass
         print('region', rg, len(plist), 'valleys', len(lines), 'waterways', flush=True)
+        water = {}
         if not lines:
             continue
         lg = [l[2] for l in lines]
@@ -266,6 +270,9 @@ def name_units(attrs, ids, geoms, gidx):
                 weak[p] = within[p]
             if across:
                 joined[p] = {n: round(k, 2) for n, k in across.items()}
+        if water:
+            pickle.dump(water, open(os.path.join(wdir, rg + '.pkl'), 'wb'))
+    # (the per-region dumps are written at the end of each region's loop, below the valley loop)
     # a mouth takes the river its trunk brings down to it, if that river is in it; otherwise its longest
     ups = collections.defaultdict(list)
     for p, d in attrs.items():
@@ -287,8 +294,7 @@ def name_units(attrs, ids, geoms, gidx):
         else:
             names[p] = max(tot, key=lambda n: tot[n])
     json.dump({'names': names, 'inside': inside, 'within': within, 'joined': joined}, open(cache, 'w', encoding='utf-8'), ensure_ascii=False)
-    pickle.dump(water, open(os.path.join(WORK, 'water8.pkl'), 'wb'))
-    return names, inside, water
+    return names, inside
 
 
 # ---------------------------------------------------------------- river paths
@@ -321,6 +327,8 @@ def build_paths(attrs, names, main_name):
             base = main_name.get(attrs[p]['MAIN_BAS']) or n
             if n and ('–' in base or base.endswith(' basin')):
                 base = n                                 # Murray-Darling names a basin; the river at its mouth is the Murray
+            elif base.endswith(' basin'):
+                base = ''                                # a sink has no river of its own: paths start at the first river above it
             pt = (('', base),) if base else ()
             if n and base and n != base:
                 pt = pt + (('>', n),)
@@ -440,10 +448,27 @@ def main():
             geoms.append(geom_of(f['geometry']))
     del gj
     gidx = {p: i for i, p in enumerate(ids)}
-    names, inside, water = name_units(attrs, ids, geoms, gidx)
-    kids = collections.defaultdict(list)
-    for p in water:
-        kids[str(p)[:3]].append(p); kids[str(p)[:4]].append(p)
+    names, inside = name_units(attrs, ids, geoms, gidx)
+
+    def tidy(n):                                  # 'Ob River' slipped past clean_name's length guard
+        if n.lower().endswith(' river') and len(n) > 7:
+            return n[:-6]
+        if n.lower().startswith('river ') and len(n) > 7:
+            return n[6:]
+        return n
+    names = {p: tidy(n) for p, n in names.items()}
+    inside = {p: [tidy(n) for n in v] for p, v in inside.items()}
+    for k in ('within', 'joined'):
+        G[k] = {p: ({tidy(n): x for n, x in v.items()} if isinstance(v, dict) else v) for p, v in G[k].items()}
+    wcache = {}
+
+    def water_region(rg):
+        if rg not in wcache:
+            if len(wcache) > 3:
+                wcache.clear()
+            f = os.path.join(WORK, 'water', rg + '.pkl')
+            wcache[rg] = pickle.load(open(f, 'rb')) if os.path.exists(f) else {}
+        return wcache[rg]
     print('named', len(names), 'of', len(attrs), flush=True)
 
     # ---- the basins: everything that shares a mouth
@@ -644,9 +669,13 @@ def main():
 
         def water_of(code, tol, q):
             wn, widx, out = [], {}, []
-            for p8 in kids.get(code, ()):
-                for n, st, wb in water[p8]:
-                    g = shp_wkb.loads(wb).simplify(tol)
+            wr = water_region(code[:3])
+            for p8 in sorted(k for k in wr if str(k).startswith(code)):
+                for n, st, wb in wr[p8]:
+                    g = shp_wkb.loads(wb)
+                    if lvl == 7 and not st and g.length < 0.06:
+                        continue                         # at this zoom a pixel is a kilometre: short creeks wait for level 8
+                    g = g.simplify(tol)
                     c = [(int(round(x * q)), int(round(y * q))) for x, y in g.coords]
                     flatc = [c[0][0], c[0][1]]
                     for (x0, y0), (x1, y1) in zip(c, c[1:]):

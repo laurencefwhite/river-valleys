@@ -26,12 +26,15 @@ for a in args:
     if a == 'world':
         for x in range(-180, 180, 60):
             for y in range(-60, 90, 50):
-                jobs.append(('cell_%+04d_%+03d' % (x, y), (x, y, x + 60, y + 50)))
+                if os.path.exists(os.path.join(OUT, 'part-cell_%+04d_%+03d.parquet' % (x, y))):
+                    continue                      # fetched whole, before the cells were halved
+                for hx in (x, x + 30):            # halves, so that a stopped run loses less
+                    jobs.append(('half_%+04d_%+03d' % (hx, y), (hx, y, hx + 30, y + 50)))
     else:
         jobs.append((a, REGIONS[a]))
 
 con = duckdb.connect()
-con.execute("INSTALL httpfs; LOAD httpfs; INSTALL spatial; LOAD spatial; SET threads=4; SET memory_limit='3GB'; SET preserve_insertion_order=false; SET s3_region='us-west-2'; SET http_retries=10;")
+con.execute("INSTALL httpfs; LOAD httpfs; INSTALL spatial; LOAD spatial; SET threads=4; SET memory_limit='2GB'; SET preserve_insertion_order=false; SET s3_region='us-west-2'; SET http_retries=10;")
 src = "s3://overturemaps-us-west-2/release/%s/theme=base/type=water/*.parquet" % REL
 for name, (x0, y0, x1, y1) in jobs:
     dst = os.path.join(OUT, 'part-%s.parquet' % name).replace(os.sep, '/')
