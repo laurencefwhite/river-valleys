@@ -67,3 +67,7 @@ HydroBASINS is free for scientific, educational and commercial use with attribut
 in the HydroSHEDS technical documentation. River names come from Natural Earth's 10m rivers, so a valley
 whose river is not in that set is shown as unnamed. Small stretches of coast hold many short rivers, each
 with its own mouth; at these levels HydroBASINS lumps them, and the map calls them coastal valleys.
+
+## Copyright
+
+Code and page © 2026 Laurence F. White. The data credits above carry their own licences.
