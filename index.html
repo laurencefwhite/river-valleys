@@ -41,6 +41,7 @@ body{
 }
 #stage{position:fixed;inset:0}
 canvas{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none}
+#gl{pointer-events:none}
 #globe{cursor:grab}
 #globe.dragging{cursor:grabbing}
 
@@ -242,6 +243,7 @@ canvas{position:absolute;inset:0;width:100%;height:100%;display:block;touch-acti
 <body>
 <div id="stage">
   <canvas id="sky"></canvas>
+  <canvas id="gl" aria-hidden="true"></canvas>
   <canvas id="globe"></canvas>
 
   <div id="tip"></div>
@@ -329,6 +331,7 @@ canvas{position:absolute;inset:0;width:100%;height:100%;display:block;touch-acti
 </div>
 
 <script src="lib/globe-libs.js"></script>
+<script src="lib/globe-gl.js"></script>
 <script src="data/base.js"></script>
 <script src="data/l4.js"></script>
 <script>
@@ -337,6 +340,13 @@ canvas{position:absolute;inset:0;width:100%;height:100%;display:block;touch-acti
 
 var D = window.RV_DATA;
 var DEG = Math.PI / 180;
+
+/* The heavy layers - ocean, land, every valley, the lines of divides, coasts, rivers and creeks, the lakes - go
+   to the graphics card when it can take them; the 2D canvas on top keeps the labels, the highlight, the
+   graticule and the shading. Without WebGL 2, or with ?gl=0, all is 2D. */
+var glCv = document.getElementById('gl');
+var GL = (window.GlobeGL && !/[?&]gl=0\b/.test(location.search)) ? GlobeGL.create(glCv) : null;
+if (!GL) glCv.style.display = 'none';
 
 /* ------------------------------------------------------------------ data */
 /* one entry per mouth (or inland sink), keyed by the Pfafstetter code of the valley at the mouth */
@@ -412,6 +422,13 @@ function toXYZ(g) {
   else if (g.type === 'MultiPolygon') for (i = 0; i < c.length; i++) for (j = 0; j < c[i].length; j++) add(c[i][j]);
   else if (g.type === 'LineString') add(c);
   else if (g.type === 'MultiLineString') for (i = 0; i < c.length; i++) add(c[i]);
+  return rings;
+}
+function xyzOf(e) { return e.xyz || (e.xyz = toXYZ(e.g.geometry || e.g)); }
+function xyzHoles(e) {
+  var rings = xyzOf(e), g = e.g.geometry || e.g, c = g.coordinates, k = 0, i, j;
+  if (g.type === 'Polygon') for (i = 0; i < c.length; i++) rings[k++].hole = i > 0;
+  else if (g.type === 'MultiPolygon') for (i = 0; i < c.length; i++) for (j = 0; j < c[i].length; j++) rings[k++].hole = j > 0;
   return rings;
 }
 var FX = [0, 0, 0], FY = [0, 0, 0];
@@ -565,14 +582,100 @@ function buildSet(topo, level) {
       var g = { type: 'LineString', coordinates: pts };
       water.push({ g: g, cap: capOf(g), river: w[1], c4: w[2], n: topo.water.names[w[0]] });
     });
+    /* in runs by kind and region, so the card can leave out a region a finer tile already draws */
+    water.sort(function (a, b) { return a.river - b.river || (a.c4 < b.c4 ? -1 : a.c4 > b.c4 ? 1 : 0); });
   }
   var S = {
     level: level, topo: topo, obj: obj, set: set, water: water,
     divide: lineSet(topo, topo.lines.d), sub: lineSet(topo, topo.lines.s), coast: lineSet(topo, topo.lines.c, true),
     outline: {}
   };
+  if (GL) glSet(S);
   paintTier(S);
   return S;
+}
+function lineXYZ(list) { return list.map(function (l) { return xyzOf(l)[0]; }); }
+/* Cutting a shape crossing the limb costs in proportion to its corners, and the largest valleys and countries
+   have thousands. For the card they are cut once into pieces of ten degrees square: a piece wholly on the near
+   side needs no cutting at all, and only the few on the limb are cut each frame. */
+var PIECE = 10;
+function ringArea(r) { var a = 0; for (var i = 0, n = r.length; i < n - 1; i++) a += r[i][0] * r[i + 1][1] - r[i + 1][0] * r[i][1]; return a; }
+/* The sides of a piece run along meridians and parallels, and a parallel is not a great circle: given corners
+   every half degree in longitude and latitude, the side follows the parallel, as the neighbouring piece's does. */
+function alongParallels(r) {
+  var out = [r[0]];
+  for (var i = 1; i < r.length; i++) {
+    var a = r[i - 1], b = r[i], m = Math.ceil(Math.max(Math.abs(b[0] - a[0]), Math.abs(b[1] - a[1])) / 0.5);
+    for (var k = 1; k < m; k++) out.push([a[0] + (b[0] - a[0]) * k / m, a[1] + (b[1] - a[1]) * k / m]);
+    out.push(b);
+  }
+  return out;
+}
+/* A ring that crosses the antimeridian jumps from 180 to -180, and laid flat it would span the whole map; it is
+   carried on past 180 instead (longitudes beyond 180 are the same places to the sphere). */
+function unwrapped(g) {
+  function ring(r) {
+    var out = [r[0].slice()], shift = 0;
+    for (var i = 1; i < r.length; i++) {
+      var d = r[i][0] - r[i - 1][0];
+      if (d > 180) shift -= 360; else if (d < -180) shift += 360;
+      out.push([r[i][0] + shift, r[i][1]]);
+    }
+    return out;
+  }
+  if (g.type === 'Polygon') return { type: 'Polygon', coordinates: g.coordinates.map(ring) };
+  if (g.type === 'MultiPolygon') return { type: 'MultiPolygon', coordinates: g.coordinates.map(function (p) { return p.map(ring); }) };
+  return g;
+}
+function piecesOf(g) {
+  g = unwrapped(g);
+  var b = planarBox(g);
+  if (b[2] - b[0] <= PIECE && b[3] - b[1] <= PIECE) return null;
+  var c = g.type === 'Polygon' ? g.coordinates : g.type === 'MultiPolygon' ? g.coordinates[0] : null;
+  if (!c || !c[0]) return null;
+  /* the way an outer ring turns, so that the rings cut from it can be told from holes */
+  var outer = ringArea(c[0]) >= 0, out = [], rings = [], cur = null;
+  var sink = {
+    point: function (x, y) { cur.push([x, -y]); },
+    lineStart: function () { cur = []; },
+    lineEnd: function () { if (cur.length > 2) { cur.push(cur[0]); rings.push(alongParallels(cur)); } cur = null; },
+    polygonStart: function () {}, polygonEnd: function () {}, sphere: function () {}
+  };
+  for (var x = Math.floor(b[0] / PIECE) * PIECE; x < b[2]; x += PIECE) {
+    for (var y = Math.floor(b[1] / PIECE) * PIECE; y < b[3]; y += PIECE) {
+      rings = [];
+      /* d3 cuts in screen terms, y downwards, and takes the turn of an outline that way: so latitude goes in upside down */
+      d3.geoStream(g, d3.geoIdentity().reflectY(true).clipExtent([[x, -y - PIECE], [x + PIECE, -y]]).stream(sink));
+      if (!rings.length) continue;
+      var pg = { type: 'Polygon', coordinates: rings }, xyz = toXYZ(pg);
+      for (var k = 0; k < rings.length; k++) xyz[k].hole = (ringArea(rings[k]) >= 0) !== outer;
+      out.push({ g: pg, xyz: xyz, cap: capOf(pg) });
+    }
+  }
+  return out.length ? out : null;
+}
+function glSet(S) {
+  var items = [], owner = [];
+  S.set.forEach(function (e, k) {
+    var parts = e.area > 2e4 ? piecesOf(e.g.geometry) : null;
+    if (parts) {
+      e.pieces = parts;
+      parts.forEach(function (p) { p.gi = items.length; items.push(denseAll(p.xyz)); owner.push(k); });
+    } else { e.gi = items.length; items.push(denseAll(xyzHoles(e))); owner.push(k); }
+  });
+  S.gl = GL.accSet(items); S.glOwner = owner;
+  S.wDiv = GL.wideSet(lineXYZ(S.divide)); S.wSub = GL.wideSet(lineXYZ(S.sub)); S.wCoast = GL.wideSet(lineXYZ(S.coast));
+  S.wWater = GL.wideSet(lineXYZ(S.water));
+  S.wRuns = [];
+  for (var i = 0; i < S.water.length; i++) {
+    var w = S.water[i], last = S.wRuns[S.wRuns.length - 1];
+    if (last && last.river === w.river && last.c4 === w.c4) last.b = i + 1;
+    else S.wRuns.push({ river: w.river, c4: w.c4, a: i, b: i + 1 });
+  }
+}
+function glDrop(S) {
+  if (!GL || !S.gl) return;
+  GL.accDrop(S.gl); [S.wDiv, S.wSub, S.wCoast, S.wWater].forEach(function (L) { GL.dropWide(L); });
 }
 function buildTier(t) {
   tiers[t.key] = buildSet(D[t.key], t.level);
@@ -583,6 +686,18 @@ function paintTier(T) {
     var e = T.set[i];
     e.hcl = unitHcl(e.p, e.main, opt.shade, opt.inland);
     e.fill = css(e.hcl);
+  }
+  if (T.gl) {
+    for (i = 0; i < T.set.length; i++) {
+      var c = d3.rgb(T.set[i].fill);
+      T.set[i].fillB = [c.r, c.g, c.b];
+    }
+    var b = new Uint8Array(T.glOwner.length * 4);
+    for (i = 0; i < T.glOwner.length; i++) {
+      var fb = T.set[T.glOwner[i]].fillB;
+      b[i * 4] = fb[0]; b[i * 4 + 1] = fb[1]; b[i * 4 + 2] = fb[2]; b[i * 4 + 3] = 255;
+    }
+    GL.accColours(T.gl, b);
   }
 }
 function repaint() {
@@ -632,7 +747,7 @@ window.RV_TILE = function (level, code, topo) {
   var codes = Object.keys(tl.built);
   if (codes.length > tl.keep) {
     codes.sort(function (a, b) { return tl.built[a].used - tl.built[b].used; });
-    for (var i = 0; i < codes.length - tl.keep; i++) { delete tl.built[codes[i]]; delete tl.asked[codes[i]]; }
+    for (var i = 0; i < codes.length - tl.keep; i++) { glDrop(tl.built[codes[i]]); delete tl.built[codes[i]]; delete tl.asked[codes[i]]; }
   }
 };
 function askTile(tl, code) {
@@ -705,6 +820,12 @@ var skyCv  = document.getElementById('sky');
 var cv     = document.getElementById('globe');
 var ctx    = cv.getContext('2d');
 var skyCtx = skyCv.getContext('2d');
+/* if the browser takes the graphics context away (memory pressure, a driver reset), carry on in 2D */
+glCv.addEventListener('webglcontextlost', function (ev) {
+  ev.preventDefault();
+  GL = null; glCv.style.display = 'none';
+  setTimeout(function () { draw(); }, 0);
+});
 
 var W = 0, H = 0, DPR = 1, R0 = 1, CX = 0, CY = 0;
 var rotation = [-12, -18, 0];
@@ -745,6 +866,7 @@ function resize() {
   });
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   skyCtx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  if (GL) GL.resize(W, H, DPR);
   var narrow = W < 700;
   R0 = Math.min(W, H) * (narrow ? 0.47 : 0.475);
   CX = W / 2;
@@ -817,6 +939,140 @@ function outlineOf(T, m) {
   return T.outline[m];
 }
 
+/* ------------------------------------------------------ the graphics card */
+var GLC = window.GlobeGL ? {
+  ocean0: GlobeGL.rgba(PALETTE.ocean0).slice(0, 3), ocean1: GlobeGL.rgba(PALETTE.ocean1).slice(0, 3),
+  land: GlobeGL.rgba(PALETTE.land), lake: GlobeGL.rgba(PALETTE.lake), coast: GlobeGL.rgba(PALETTE.coast),
+  divide: GlobeGL.rgba(PALETTE.divide), sub: GlobeGL.rgba(PALETTE.sub), bed: GlobeGL.rgba(PALETTE.bed),
+  river: function (a) { return [70 / 255, 214 / 255, 1, a]; }
+} : null;
+/* The card folds the far side of a shape onto the limb, so nothing is clipped on the processor; that holds only
+   while corners are close together, so any edge longer than half a degree (the sides of the pieces, and a few
+   long straight edges in the data) is given corners along it, once, as the shape goes to the card. */
+var DENSE = Math.cos(0.5 * DEG);
+function dense(a) {
+  var n = a.length / 3, out = [], i, k;
+  for (i = 0; i < n; i++) {
+    var x0 = a[i * 3], y0 = a[i * 3 + 1], z0 = a[i * 3 + 2];
+    out.push(x0, y0, z0);
+    if (i === n - 1) break;
+    var x1 = a[i * 3 + 3], y1 = a[i * 3 + 4], z1 = a[i * 3 + 5], d = x0 * x1 + y0 * y1 + z0 * z1;
+    if (d >= DENSE) continue;
+    var m = Math.ceil(Math.acos(Math.max(-1, Math.min(1, d))) / (0.5 * DEG));
+    for (k = 1; k < m; k++) {
+      var t = k / m, x = x0 + (x1 - x0) * t, y = y0 + (y1 - y0) * t, z = z0 + (z1 - z0) * t, l = Math.sqrt(x * x + y * y + z * z) || 1;
+      out.push(x / l, y / l, z / l);
+    }
+  }
+  if (out.length === a.length) return a;
+  var f = new Float32Array(out);
+  f.hole = a.hole;
+  return f;
+}
+function denseAll(rings) { return rings.map(dense); }
+var glBase = null;
+function baseGL() {
+  if (glBase) return glBase;
+  /* the atlas's rivers in runs by rank, lake courses apart, so a run can be drawn or left out whole */
+  var order = riverSet.slice().sort(function (a, b) { return a.s - b.s || (a.lake ? 1 : 0) - (b.lake ? 1 : 0); }), runs = [], lines = [];
+  order.forEach(function (e) {
+    var last = runs[runs.length - 1], lk = !!e.lake, parts = xyzOf(e);
+    if (!(last && last.s === e.s && last.lake === lk)) runs.push(last = { s: e.s, lake: lk, a: lines.length, b: lines.length });
+    for (var k = 0; k < parts.length; k++) lines.push(parts[k]);
+    last.b = lines.length;
+  });
+  var land = [];
+  landSet.forEach(function (e) { var parts = piecesOf(e.g.geometry); if (parts) land.push.apply(land, parts); else land.push(e); });
+  glBase = {
+    landP: land, land: GL.set(land.map(function (e) { return denseAll(xyzOf(e)); })),
+    lakes: GL.set(lakeSet.map(function (e) { return denseAll(xyzOf(e)); })),
+    rivers: GL.wideSet(lines), runs: runs
+  };
+  return glBase;
+}
+function drawGL(T, r) {
+  var B = baseGL(), i, e, list = [];
+  GL.frame(FX, FY, CX, CY, r, viewV);
+  var gr = Math.min(r * 1.05, Math.hypot(W, H) * 0.7);
+  GL.ocean(GLC.ocean0, GLC.ocean1, CX - gr * 0.28, CY - gr * 0.32, gr * 0.06, CX, CY, gr, null);
+
+  /* land under the valleys: Antarctica, and the islands too small to have been given a basin */
+  for (i = 0; i < B.landP.length; i++) if (capVisible(B.landP[i].cap)) list.push(i);
+  GL.fillMany(B.land, list, GLC.land); GL.linesMany(B.land, list, GLC.land);
+
+  /* the valleys by level, coarsest first; each level's lines over its own fills and under the next level's */
+  if (opt.basins) {
+    var groups = [[T], [], []];
+    scene.sets.forEach(function (S) { groups[S.level - 6].push(S); });
+    for (var g = 0; g < 3; g++) {
+      var sets = groups[g];
+      if (!sets.length) continue;
+      GL.accBegin();
+      sets.forEach(function (S) {
+        var list = [];
+        for (var k = 0; k < S.set.length; k++) {
+          var u = S.set[k];
+          if (!capVisible(u.cap) || covered(u, scene)) continue;
+          if (!u.pieces) { list.push(u.gi); continue; }
+          for (var pi = 0; pi < u.pieces.length; pi++) if (capVisible(u.pieces[pi].cap)) list.push(u.pieces[pi].gi);
+        }
+        GL.accFill(S.gl, list);
+      });
+      GL.accEnd(1);
+      sets.forEach(function (S) {
+        if (opt.edges && opt.shade) GL.drawWide(S.wSub, GLC.sub, 0.55);
+        if (opt.edges) GL.drawWide(S.wDiv, GLC.divide, 1.05);
+        GL.drawWide(S.wCoast, GLC.coast, 0.75);
+      });
+    }
+  } else GL.drawWide(T.wCoast, GLC.coast, 0.75);
+
+  /* the tiles' own creeks and rivers; the atlas's rivers stand down where every tile in view has them */
+  var ownWater = scene.sets.length > 0 && scene.sets.every(function (S) { return S.water.length > 0; });
+  if (opt.rivers && scene.sets.length) {
+    for (var pass = 0; pass < 2; pass++) {
+      for (var wk = 0; wk < 2; wk++) {                    /* creeks under rivers, beds under both */
+        var ww = (wk ? 1.7 : 0.95) * (0.9 + 0.25 * Math.min(4, zoom / 16));
+        for (var si = 0; si < scene.sets.length; si++) {
+          var WS = scene.sets[si], runs = [];
+          for (i = 0; i < WS.wRuns.length; i++) {
+            var ru = WS.wRuns[i];
+            if (ru.river === wk && !(WS.level === 7 && scene.cov8[ru.c4])) runs.push([ru.a, ru.b]);
+          }
+          if (!runs.length) continue;
+          if (!pass) GL.drawWide(WS.wWater, GLC.bed, ww + 1.6, runs);
+          else GL.drawWide(WS.wWater, GLC.river(wk ? 1 : 0.92), ww, runs);
+        }
+      }
+    }
+  }
+  if (opt.rivers && !ownWater) {
+    /* the great rivers at any distance, the rest as the zoom earns them */
+    var maxRank = 2.5 + zoom * 1.4;
+    var bands = [[0, 2, 2.0, 1], [3, 4, 1.5, 1], [5, 6, 1.15, .95], [7, 8, 0.95, .9], [9, 12, 0.8, .85]];
+    var grow = 0.8 + 0.2 * Math.min(3, zoom);
+    for (var b = bands.length - 1; b >= 0; b--) {
+      if (bands[b][0] > maxRank) continue;
+      var rr = [];
+      for (i = 0; i < B.runs.length; i++) {
+        var q = B.runs[i];
+        if (q.s < bands[b][0] || q.s > bands[b][1] || q.s > maxRank || (q.lake && !opt.lakes)) continue;
+        rr.push([q.a, q.b]);
+      }
+      if (!rr.length) continue;
+      GL.drawWide(B.rivers, GLC.bed, bands[b][2] * grow + 1.5, rr);
+      GL.drawWide(B.rivers, GLC.river(bands[b][3]), bands[b][2] * grow, rr);
+    }
+  }
+
+  if (opt.lakes) {
+    var minLake = 2e-5 / (zoom * zoom);
+    list = [];
+    for (i = 0; i < lakeSet.length; i++) if (lakeSet[i].area >= minLake && capVisible(lakeSet[i].cap)) list.push(i);
+    GL.fillMany(B.lakes, list, GLC.lake);
+  }
+}
+
 function draw() {
   applyProjection();
   var cx = CX, cy = CY, r = R0 * zoom;
@@ -836,8 +1092,15 @@ function draw() {
   ag.addColorStop(0.35, 'rgba(90,150,235,.11)');
   ag.addColorStop(1, 'rgba(70,130,220,0)');
   ctx.fillStyle = ag;
-  ctx.beginPath(); ctx.arc(cx, cy, r * 1.19, 0, 2 * Math.PI); ctx.fill();
+  /* a ring, not a disc: a radial gradient carries its first colour inwards, and over the WebGL globe
+     that would wash the whole disc towards blue */
+  ctx.beginPath(); ctx.arc(cx, cy, r * 1.19, 0, 2 * Math.PI);
+  if (GL) ctx.arc(cx, cy, r * 0.985, 0, 2 * Math.PI, true);
+  ctx.fill();
 
+  scene = composeScene(T, !fast);
+  if (GL) drawGL(T, r);
+  else {
   /* ocean */
   ctx.beginPath(); path(sphere);
   var og = ctx.createRadialGradient(cx - r * 0.28, cy - r * 0.32, r * 0.06, cx, cy, r * 1.05);
@@ -857,7 +1120,6 @@ function draw() {
   }
 
   /* the valleys: the whole-world cut first, then whatever finer tiles are in, each over the last */
-  scene = composeScene(T, !fast);
   if (opt.basins) {
     var layers = [T].concat(scene.sets);
     for (var li = 0; li < layers.length; li++) {
@@ -933,6 +1195,7 @@ function draw() {
       trace(lakeSet[i], true);
     }
     ctx.fill();
+  }
   }
 
   if (opt.co && !fast) {
@@ -1759,6 +2022,8 @@ window.RV = {
   setView: function (lon, lat, z) { rotation = [-lon, -lat, 0]; if (z) zoom = z; draw(); },
   flyTo: flyTo,
   drawMs: function () { var t = performance.now(); draw(); return performance.now() - t; },
+  drawMsSync: function () { var t = performance.now(); draw(); if (GL) GL.gl.finish(); return performance.now() - t; },
+  renderer: function () { return GL ? 'webgl: ' + GL.renderer() : '2d'; },
   opt: opt
 };
 
